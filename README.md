@@ -159,6 +159,9 @@ python scripts/sweep_joints.py --real          # 전체
      → PyBullet IK (손끝 8점 → 16 관절각) → MuJoCo 디지털 트윈 → (선택) 실기
 ```
 
+> 작업대에서 따라갈 순서는 **[docs/teleop_howto.md](docs/teleop_howto.md)** 에 정리했다.
+> 촬영 환경, 단계별 확인 항목, 출력 숫자 읽는 법, 튜닝, 문제 해결까지 포함한다.
+
 ```bash
 bash scripts/fetch_mediapipe_model.sh          # 최초 1회 (7.5MB, 저장소에 없음)
 python scripts/check_hand_tracking.py          # 추적만 먼저 확인
@@ -174,7 +177,9 @@ python scripts/teleop_mujoco.py --real         # 실기까지
 MediaPipe world 랜드마크에서, 로봇 쪽은 URDF 영점 자세에서 뽑는다.
 
 이렇게 하면 카메라 앞에서 손을 어떻게 들고 있든 회전·평행이동이 상쇄된다.
-크기는 손바닥 폭 비율로 맞춘다 — LEAP이 90.9mm, 성인 손이 40mm 근처라 **약 2.3배**다.
+크기는 손바닥 폭 비율로 매 프레임 맞춘다. LEAP 쪽은 90.9mm로 고정이고, 사람 쪽은
+MediaPipe가 추정한 값을 쓴다 — `check_hand_tracking.py`가 실측값과 그로부터 나온
+배율을 출력한다. 사람 손이 훨씬 작아 배율은 2배 안팎이 된다.
 
 관절각을 그대로 베끼지 않고 손끝을 목표로 IK를 푸는 이유는 두 손의 링크 길이와
 축 배치가 다르기 때문이다. 조작에서 중요한 건 관절각이 아니라 손끝 위치다.
@@ -309,6 +314,7 @@ scripts/
   fetch_mediapipe_model.sh   MediaPipe 모델 내려받기
 docs/
   real_hand_bringup.md   실기 시작 절차
+  teleop_howto.md        텔레오퍼레이션 실습 절차
 third_party/             참조용 clone 4종 (아래)
 models/                  MediaPipe 모델 (저장소에 없음, 위 스크립트로 받는다)
 joint_mapping.json       매핑 테이블 내보내기
