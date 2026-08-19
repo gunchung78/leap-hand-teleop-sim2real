@@ -40,12 +40,49 @@ from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 from leap_hand_mapping import joint_map as jm  # noqa: E402
 from leap_hand_mapping.retarget import (  # noqa: E402
     EE_LINKS,
+    FINGERS,
     MCP_LINKS,
+    ROOT_LINKS,
     LeapRetargeter,
 )
 
-# 사람 손 크기로 줄일 때 쓰는 값. LEAP 손바닥 폭이 91mm, 성인 손은 40mm 근처다.
+# 사람 손 크기로 줄일 때 쓰는 값. 리타겟터가 배율을 스스로 다시 계산하므로
+# 구체적인 값 자체는 결과에 영향을 주지 않는다. 상쇄되는지 보는 게 목적이다.
 HUMAN_PALM_WIDTH = 0.040
+
+# 사람 손가락에서 MCP->PIP 와 PIP->DIP 의 길이 비. 근위지골이 중위지골보다 길다.
+PHALANX_RATIO = 0.6
+
+
+def middle_joint(root: np.ndarray, end: np.ndarray, total: float,
+                 bend_dir: np.ndarray) -> np.ndarray:
+    """뿌리와 끝 사이에 마디 두 개짜리 사슬의 중간 관절을 놓는다.
+
+    사람 손가락은 강체 마디로 이어져 있어서 굽혀도 마디 길이 합이 변하지 않는다.
+    가짜 사람 손도 그래야 리타겟터가 계산하는 길이 배율이 자세에 무관해진다.
+    (LEAP 링크 원점을 그대로 PIP 로 쓰면 그 사이에 관절이 둘 끼어 있어서
+     길이가 자세에 따라 변한다. 그러면 왕복이 정확할 수 없다.)
+
+    total 을 뿌리->끝 도달거리로 잡아 두면 배율이 정확히 1/축소배율로 나와
+    시험이 닫힌다. 대신 이 시험은 **길이 배율 자체의 타당성은 보증하지 않는다** —
+    그쪽은 실제 손을 재서 확인할 문제다(README 의 비율 표).
+    """
+    u = end - root
+    d = float(np.linalg.norm(u))
+    l1 = total * PHALANX_RATIO
+    l2 = total - l1
+    if d < 1e-9 or d >= l1 + l2:
+        # 완전히 뻗은 (또는 도달거리를 넘는) 경우. 직선 위에 놓는다.
+        direction = u / d if d > 1e-9 else np.array([1.0, 0.0, 0.0])
+        return root + direction * min(l1, d)
+
+    u_hat = u / d
+    along = (d * d + l1 * l1 - l2 * l2) / (2.0 * d)
+    perp = bend_dir - np.dot(bend_dir, u_hat) * u_hat
+    n = np.linalg.norm(perp)
+    perp = perp / n if n > 1e-9 else np.zeros(3)
+    height = np.sqrt(max(l1 * l1 - along * along, 0.0))
+    return root + along * u_hat + height * perp
 
 
 def fake_human_landmarks(rt: LeapRetargeter, q: np.ndarray, rng) -> np.ndarray:
@@ -54,9 +91,16 @@ def fake_human_landmarks(rt: LeapRetargeter, q: np.ndarray, rng) -> np.ndarray:
     for i, joint in enumerate(rt.dof_indices):
         p.resetJointState(rt.uid, joint, float(q[i]), physicsClientId=rt.client)
 
+    root = {f: rt._link_origin(idx) for f, idx in ROOT_LINKS.items()}
     mcp = {f: rt._link_origin(idx) for f, idx in MCP_LINKS.items()}
     dip = {f: rt._link_origin(EE_LINKS[f][0]) for f in EE_LINKS}
     tip = {f: rt._link_origin(EE_LINKS[f][1]) for f in EE_LINKS}
+
+    # 중간 관절은 손바닥 쪽으로 굽힌다. 사람 손이 그렇게 굽는다.
+    bend = -rt.reference.rotation[:, 2]
+    mid = {
+        f: middle_joint(root[f], dip[f], rt.reference.reach[f], bend) for f in FINGERS
+    }
 
     # 손목은 랜드마크 배치를 채우기 위한 점이다. 리타겟터는 이 점을 손가락 방향
     # (손목 -> 중지 MCP)에만 쓰므로, 영점 자세의 손가락 방향 반대편에 둔다.
@@ -66,14 +110,17 @@ def fake_human_landmarks(rt: LeapRetargeter, q: np.ndarray, rng) -> np.ndarray:
 
     lm = np.zeros((ht.NUM_LANDMARKS, 3))
     lm[ht.WRIST] = wrist
-    for f, i_mcp, i_dip, i_tip in [
-        ("index", ht.INDEX_MCP, ht.INDEX_DIP, ht.INDEX_TIP),
-        ("middle", ht.MIDDLE_MCP, ht.MIDDLE_DIP, ht.MIDDLE_TIP),
-        ("ring", ht.RING_MCP, ht.RING_DIP, ht.RING_TIP),
+    for f, i_mcp, i_pip, i_dip, i_tip in [
+        ("index", ht.INDEX_MCP, ht.INDEX_PIP, ht.INDEX_DIP, ht.INDEX_TIP),
+        ("middle", ht.MIDDLE_MCP, ht.MIDDLE_PIP, ht.MIDDLE_DIP, ht.MIDDLE_TIP),
+        ("ring", ht.RING_MCP, ht.RING_PIP, ht.RING_DIP, ht.RING_TIP),
     ]:
         lm[i_mcp] = mcp[f]
+        lm[i_pip] = mid[f]
         lm[i_dip] = dip[f]
         lm[i_tip] = tip[f]
+    lm[ht.THUMB_CMC] = root["thumb"]
+    lm[ht.THUMB_MCP] = mid["thumb"]
     lm[ht.THUMB_IP] = dip["thumb"]
     lm[ht.THUMB_TIP] = tip["thumb"]
 

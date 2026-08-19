@@ -129,6 +129,8 @@ def main() -> int:
     over_current: list = []
     tip_errors: list[float] = []
     loop_ms: list[float] = []
+    restarts: list[int] = []
+    jitter: list[float] = []   # 프레임 사이 관절각 변화. 진짜 지터인지 보는 지표
     start = last_report = time.time()
     prev = start
 
@@ -150,8 +152,11 @@ def main() -> int:
             if obs is not None:
                 detected += 1
                 lost_since = None
+                q_prev = q_cmd
                 q_cmd = retargeter.retarget(obs.world, dt=dt)
                 tip_errors.append(float(retargeter.tip_error().mean()))
+                restarts.append(retargeter.last_restarts)
+                jitter.append(float(np.abs(q_cmd - q_prev).max()))
                 if not args.no_window:
                     ht.draw_landmarks(frame, obs)
             else:
@@ -187,9 +192,11 @@ def main() -> int:
             if now - last_report >= 1.0:
                 fps = frames / (now - start)
                 tip = np.mean(tip_errors[-30:]) * 1000 if tip_errors else float("nan")
+                jit = np.degrees(np.mean(jitter[-30:])) if jitter else float("nan")
+                rst = np.mean(restarts[-30:]) if restarts else 0.0
                 msg = (f"{fps:5.1f} fps  검출 {detected}/{frames}"
-                       f"  IK 잔차 {tip:5.2f} mm  처리 {np.mean(loop_ms[-30:]):4.1f} ms"
-                       f"  접촉 {data.ncon:2d}")
+                       f"  IK 잔차 {tip:5.2f} mm  지터 {jit:5.2f} deg  재시도 {rst:3.1f}"
+                       f"  처리 {np.mean(loop_ms[-30:]):4.1f} ms  접촉 {data.ncon:2d}")
                 if over_current:
                     msg += f"  ! 전류 초과 {over_current}"
                 print(msg)
@@ -231,6 +238,11 @@ def main() -> int:
     if tip_errors:
         t = np.array(tip_errors) * 1000
         print(f"IK 손끝 잔차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm")
+    if jitter:
+        j = np.degrees(np.array(jitter))
+        print(f"프레임간 관절각 변화 평균 {j.mean():.2f} deg, 95% {np.percentile(j, 95):.2f} deg,"
+              f" 최대 {j.max():.2f} deg")
+        print(f"IK 재시도 평균 {np.mean(restarts):.2f}회/프레임 (0 이면 첫 판에 다 풀렸다는 뜻)")
     if loop_ms:
         print(f"추적+리타겟 처리 평균 {np.mean(loop_ms):.1f} ms, 95% {np.percentile(loop_ms, 95):.1f} ms")
     if hand is not None and frozen:
