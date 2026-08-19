@@ -195,8 +195,9 @@ Phase 1 의 리타겟팅은 처음에 공식 `Bidex_VisionPro_Teleop/avp_leap.py
 사람 35% : LEAP 83~89%) 절대 위치 목표는 자주 도달 불가능해진다. 벡터 집합의
 최소자승 해는 언제나 존재하므로 그 실패 모드가 구조적으로 생기지 않는다.
 
-`--retargeter ours` 로 직접 구현한 쪽을 계속 쓸 수 있다. 두 방식을 나란히 비교하는
-용도로 남겨 두었다.
+다만 **실제로 조작해 보고는 직접 구현한 쪽(`ours`)을 기본으로 되돌렸다.** 지표상
+목표 추종은 dex 가 나쁘지 않은데 손이 따라오는 느낌이 달랐다. dex 는 `--retargeter
+dex` 로 남아 있고, 비교 대상이자 대안으로 유지한다.
 
 ```bash
 git clone --depth 1 https://github.com/dexsuite/dex-urdf.git third_party/dex-urdf
@@ -205,9 +206,9 @@ pip install dex-retargeting torch --index-url https://download.pytorch.org/whl/c
 
 ---
 
-## 직접 구현한 리타겟팅 (`--retargeter ours`)
+## 직접 구현한 리타겟팅 (`--retargeter ours`, 기본)
 
-여기부터는 교체 전에 만든 쪽의 기록이다. 손끝 절대 위치를 목표로 IK 를 푼다.
+손끝 절대 위치를 목표로 IK 를 푼다.
 
 ### 기하 — 사람 손과 로봇 손을 같은 방식으로 재기
 
