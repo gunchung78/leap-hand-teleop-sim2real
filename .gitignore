@@ -16,3 +16,6 @@ __pycache__/
 outputs/
 logs/
 checkpoints/
+
+# MediaPipe 모델 (7.5MB). scripts/fetch_mediapipe_model.sh 로 받는다.
+models/
