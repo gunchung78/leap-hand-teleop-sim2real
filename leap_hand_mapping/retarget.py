@@ -103,6 +103,19 @@ SEED_LANDMARKS = {
 # LEAP 손바닥 좌표계를 만들 기준 링크 (영점 자세에서의 원점 위치를 쓴다).
 MCP_LINKS = {"index": 0, "middle": 5, "ring": 10}
 
+# 손가락별 뿌리. 각 손가락 목표를 이 점에 앵커링한다.
+# 엄지는 pip_4(모터 12)가 손바닥에 붙는 첫 링크라 그것이 뿌리다.
+ROOT_LINKS = {"index": 0, "middle": 5, "ring": 10, "thumb": 15}
+
+# 사람 쪽 대응 뿌리와, 뿌리에서 EE 까지의 마디 사슬.
+# 마디 길이의 합은 손을 굽히든 펴든 변하지 않으므로 "뻗었을 때 길이"로 쓸 수 있다.
+HUMAN_CHAIN = {
+    "index":  (ht.INDEX_MCP, ht.INDEX_PIP, ht.INDEX_DIP),
+    "middle": (ht.MIDDLE_MCP, ht.MIDDLE_PIP, ht.MIDDLE_DIP),
+    "ring":   (ht.RING_MCP, ht.RING_PIP, ht.RING_DIP),
+    "thumb":  (ht.THUMB_CMC, ht.THUMB_MCP, ht.THUMB_IP),
+}
+
 
 def orthonormal_frame(across: np.ndarray, along: np.ndarray) -> np.ndarray:
     """두 벡터로 정규직교 회전행렬을 만든다. 열이 (x, y, z) 축.
@@ -128,13 +141,17 @@ class LeapReference:
     rotation: np.ndarray            # (3,3) base <- 손바닥 좌표계
     palm_width: float               # 검지 MCP <-> 약지 MCP
     distal_length: dict = field(default_factory=dict)   # 손가락별 fingertip -> realtip
+    root: dict = field(default_factory=dict)            # 손가락별 뿌리 링크 원점
+    reach: dict = field(default_factory=dict)           # 뿌리 -> EE 직선거리 (영점 자세)
 
 
 class LeapRetargeter:
     """MediaPipe 손 랜드마크를 LEAP 관절각(MuJoCo 순서)으로 바꾼다.
 
-    PyBullet 을 DIRECT 모드로 띄워 IK 만 푸는 데 쓴다(렌더링 없음).
-    gui=True 로 하면 IK 결과와 목표점을 PyBullet 창으로 볼 수 있다.
+    IK 계산은 항상 DIRECT 클라이언트에서 한다(렌더링 없음).
+    gui=True 로 하면 표시 전용 클라이언트가 하나 더 붙어서, IK **최종 결과**와
+    목표점을 PyBullet 창으로 볼 수 있다. 계산과 표시를 분리해 둔 이유는
+    생성자 주석에 적었다.
     """
 
     def __init__(
@@ -168,12 +185,32 @@ class LeapRetargeter:
         self.smoothing = smoothing
         self.max_speed = max_speed
 
-        self.client = p.connect(p.GUI if gui else p.DIRECT)
+        # 계산용 클라이언트는 항상 DIRECT 다.
+        #
+        # IK 는 반복마다 resetJointState 로 자세를 바꿔 가며 푼다. 계산을 GUI
+        # 클라이언트에서 하면 그 중간 자세가 전부 화면에 그려져서, 손이 미친듯이
+        # 떨리고 손가락이 엉뚱한 데 갔다 오는 것처럼 보인다. 재시도 시드(굽힘
+        # 0.4/0.9/1.4 자세)까지 찍히니 더 심하다. 명령이 튀는 게 아니라 탐색
+        # 과정이 보이는 것이지만, 진단용 창이 진단을 방해하면 곤란하다.
+        #
+        # 그래서 표시용 클라이언트를 따로 두고 **최종 자세만** 넘긴다.
+        self.client = p.connect(p.DIRECT)
         p.setGravity(0, 0, 0, physicsClientId=self.client)
         self.uid = p.loadURDF(
             urdf_path, [0, 0, 0], [0, 0, 0, 1],
             useFixedBase=True, physicsClientId=self.client,
         )
+
+        self.gui_client = None
+        self.gui_uid = None
+        if gui:
+            self.gui_client = p.connect(p.GUI)
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=self.gui_client)
+            p.setGravity(0, 0, 0, physicsClientId=self.gui_client)
+            self.gui_uid = p.loadURDF(
+                urdf_path, [0, 0, 0], [0, 0, 0, 1],
+                useFixedBase=True, physicsClientId=self.gui_client,
+            )
 
         self.dof_indices = [
             i for i in range(p.getNumJoints(self.uid, physicsClientId=self.client))
@@ -197,6 +234,7 @@ class LeapRetargeter:
         self.reference = self._measure_reference()
         self._q = np.zeros(jm.NUM_JOINTS)
         self._last_targets: np.ndarray | None = None
+        self.last_restarts = 0
         self._debug_balls: list[int] = []
         if gui:
             self._create_debug_balls()
@@ -225,11 +263,18 @@ class LeapRetargeter:
             f: float(np.linalg.norm(self._link_origin(b) - self._link_origin(a)))
             for f, (a, b) in EE_LINKS.items()
         }
+        root = {f: self._link_origin(idx) for f, idx in ROOT_LINKS.items()}
+        reach = {
+            f: float(np.linalg.norm(self._link_origin(EE_LINKS[f][0]) - root[f]))
+            for f in FINGERS
+        }
         return LeapReference(
             origin=origin,
             rotation=orthonormal_frame(across, along),
             palm_width=float(np.linalg.norm(across)),
             distal_length=distal,
+            root=root,
+            reach=reach,
         )
 
     def human_frame(self, world: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
@@ -240,27 +285,67 @@ class LeapRetargeter:
         width = float(np.linalg.norm(across))
         return origin, orthonormal_frame(across, along), width
 
-    def compute_targets(self, world: np.ndarray) -> np.ndarray:
-        """21 랜드마크 -> IK 목표점 8개 (LEAP base 프레임, 미터). 순서는 EE_LINKS 와 같다."""
-        h_origin, h_rot, h_width = self.human_frame(world)
-        ref = self.reference
-        scale = self.scale_override or (ref.palm_width / max(h_width, 1e-6))
+    def finger_scales(self, world: np.ndarray) -> dict:
+        """손가락별 사람->로봇 길이 배율.
 
-        def to_leap(point: np.ndarray) -> np.ndarray:
-            local = h_rot.T @ (point - h_origin)
-            return ref.origin + ref.rotation @ (scale * local)
+        왜 손바닥 폭 하나로 안 되는가
+        ---------------------------
+        LEAP 은 손바닥이 넓고 손가락이 짧다. 사람은 반대다. 웹캠으로 실측한 값:
+
+            손가락  사람(MCP->DIP 마디합 / 손바닥 폭)   LEAP
+            검지            1.23 ~ 1.27                 0.98
+            중지            1.41 ~ 1.44                 0.98
+            약지            1.23 ~ 1.28                 0.98
+
+        손바닥 폭 비율로 균일 스케일하면 손끝 목표가 LEAP 도달거리보다 25~45%
+        멀리 찍힌다. **구조적으로 도달 불가능**하므로 IK 가 관절 한계에 붙고,
+        매 프레임 재시도 시드를 전부 소진한 뒤 덜 나쁜 해를 고른다. 그 선택이
+        프레임마다 바뀌어서 손가락이 튄다(실측 잔차 29mm, 재시도 5회/프레임).
+
+        그래서 손가락마다 **자기 길이 비율**로 스케일한다. 마디 길이의 합은 손을
+        굽혀도 변하지 않으므로 매 프레임 안정적으로 잴 수 있다.
+        """
+        scales = {}
+        for f, (a, b, c) in HUMAN_CHAIN.items():
+            length = (np.linalg.norm(world[b] - world[a])
+                      + np.linalg.norm(world[c] - world[b]))
+            scales[f] = self.reference.reach[f] / max(length, 1e-6)
+        return scales
+
+    def compute_targets(self, world: np.ndarray) -> np.ndarray:
+        """21 랜드마크 -> IK 목표점 8개 (LEAP base 프레임, 미터). 순서는 EE_LINKS 와 같다.
+
+        손가락마다 **자기 뿌리(MCP)를 원점으로** 삼고 자기 길이 배율로 스케일한다.
+        손바닥 좌표계는 방향(회전)을 맞추는 데만 쓴다.
+
+        이렇게 하면 목표가 뿌리에서 `배율 x 현재 MCP->DIP 거리` 만큼 떨어지는데,
+        이 값은 정의상 `배율 x 뻗었을 때 길이` = LEAP 도달거리 이하다.
+        즉 **거리 면에서는 항상 도달 가능**하다. 남는 것은 방향이 관절 범위 안이냐뿐.
+        """
+        _, h_rot, _ = self.human_frame(world)
+        ref = self.reference
+        scales = self.finger_scales(world)
+        gain = self.scale_override if self.scale_override else 1.0
 
         targets = []
         for f in FINGERS:
+            i_root = HUMAN_CHAIN[f][0]
             i_dip, i_tip = EE_LANDMARKS[f]
-            a = to_leap(world[i_dip])
-            b = to_leap(world[i_tip])
-            if self.distal_mode == "leap":
-                d = b - a
-                n = np.linalg.norm(d)
-                # 사람 손끝이 접힌 프레임에서는 두 점이 겹칠 수 있다. 그때는 그대로 둔다.
-                if n > 1e-6:
-                    b = a + ref.distal_length[f] * d / n
+            s_f = scales[f] * gain
+
+            # 뿌리에서 본 상대 위치만 옮긴다. 손바닥 폭은 관여하지 않는다.
+            a = ref.root[f] + ref.rotation @ (s_f * (h_rot.T @ (world[i_dip] - world[i_root])))
+
+            d = h_rot.T @ (world[i_tip] - world[i_dip])
+            n = np.linalg.norm(d)
+            if n > 1e-6:
+                if self.distal_mode == "leap":
+                    # 방향만 사람에게서 받고 길이는 LEAP 자신의 말단 마디 값을 쓴다.
+                    b = a + ref.distal_length[f] * (ref.rotation @ (d / n))
+                else:
+                    b = a + ref.rotation @ (s_f * d)
+            else:
+                b = a
             targets.append(a)
             targets.append(b)
         return np.array(targets)
@@ -374,11 +459,13 @@ class LeapRetargeter:
         """
         q = self._solve_dls(targets, self._q if seed is None else seed)
         residual = self.finger_residual(targets, q)
+        self.last_restarts = 0
 
         for alt in alt_seeds:
             failed = [f for f, r in residual.items() if r > self.restart_threshold]
             if not failed:
                 break
+            self.last_restarts += 1
             q_alt = self._solve_dls(targets, alt)
             residual_alt = self.finger_residual(targets, q_alt)
             for f in failed:
@@ -440,8 +527,7 @@ class LeapRetargeter:
 
         self._seed(self._q)
         self._last_targets = targets
-        if self.gui:
-            self._update_debug_balls(targets)
+        self._update_gui(self._q, targets)
         return self._q.copy()
 
     def tip_error(self) -> np.ndarray:
@@ -469,26 +555,44 @@ class LeapRetargeter:
                   (1, 1, 0.3, 1), (1, 1, 0, 1)]
         for color in colors:
             vis = p.createVisualShape(
-                p.GEOM_SPHERE, radius=0.006, rgbaColor=color, physicsClientId=self.client
+                p.GEOM_SPHERE, radius=0.006, rgbaColor=color,
+                physicsClientId=self.gui_client,
             )
             self._debug_balls.append(
                 p.createMultiBody(
                     baseMass=0, baseVisualShapeIndex=vis, basePosition=[0, 0, 0],
-                    physicsClientId=self.client,
+                    physicsClientId=self.gui_client,
                 )
             )
+
+    def _update_gui(self, q: np.ndarray, targets: np.ndarray) -> None:
+        """표시용 클라이언트에 최종 자세와 목표점만 반영한다.
+
+        계산용 클라이언트와 분리되어 있으므로 IK 반복 중간 자세는 보이지 않는다.
+        여기 보이는 것이 곧 MuJoCo/실기로 나가는 명령이다.
+        """
+        if self.gui_client is None:
+            return
+        for i, joint in enumerate(self.dof_indices):
+            self.p.resetJointState(
+                self.gui_uid, joint, float(q[i]), physicsClientId=self.gui_client
+            )
+        self._update_debug_balls(targets)
 
     def _update_debug_balls(self, targets: np.ndarray) -> None:
         for ball, target in zip(self._debug_balls, targets):
             self.p.resetBasePositionAndOrientation(
-                ball, target.tolist(), [0, 0, 0, 1], physicsClientId=self.client
+                ball, target.tolist(), [0, 0, 0, 1], physicsClientId=self.gui_client
             )
 
     def close(self) -> None:
-        try:
-            self.p.disconnect(physicsClientId=self.client)
-        except Exception:
-            pass
+        for client in (self.client, self.gui_client):
+            if client is None:
+                continue
+            try:
+                self.p.disconnect(physicsClientId=client)
+            except Exception:
+                pass
 
     def __enter__(self):
         return self
