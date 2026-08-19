@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 from leap_hand_mapping import joint_map as jm  # noqa: E402
 from leap_hand_mapping.retarget import LeapRetargeter  # noqa: E402
+from leap_hand_mapping.retarget_dex import DexRetargeter  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MJCF_SCENE = os.path.join(REPO, "third_party/mujoco_menagerie/leap_hand/scene_right.xml")
@@ -53,8 +54,17 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--mirror", action="store_true",
                     help="영상 좌우 반전. 오른손이 Right 로 안 잡히면 켤 것")
 
+    ap.add_argument("--retargeter", default="dex", choices=["dex", "ours"],
+                    help="dex-retargeting(기본) 또는 직접 구현한 위치 IK")
+    ap.add_argument("--dex-type", default="dexpilot", choices=["dexpilot", "vector"],
+                    help="dexpilot 은 손끝끼리의 거리까지 목표에 넣는다 (집기에 유리)")
+    ap.add_argument("--dex-scale", type=float, default=None,
+                    help="dex-retargeting 의 scaling_factor 덮어쓰기 (기본 1.6)")
+    ap.add_argument("--dex-alpha", type=float, default=None,
+                    help="dex-retargeting low-pass 계수 덮어쓰기 (기본 0.2, 작을수록 부드럽다)")
+
     ap.add_argument("--scale", type=float, default=None,
-                    help="사람->로봇 스케일 고정. 기본은 손바닥 폭 비율로 매 프레임 자동")
+                    help="[--retargeter ours] 자동 배율에 곱하는 배수")
     ap.add_argument("--smoothing", type=float, default=0.4,
                     help="지수 평활 계수. 1이면 평활 없음, 작을수록 부드럽고 느리다")
     ap.add_argument("--max-speed", type=float, default=8.0, help="관절 속도 상한 (rad/s)")
@@ -94,14 +104,27 @@ def main() -> int:
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
 
     tracker = ht.HandTracker(handedness=args.hand, mirror=args.mirror)
-    retargeter = LeapRetargeter(
-        gui=args.pybullet_gui,
-        scale=args.scale,
-        distal_mode=args.distal_mode,
-        smoothing=args.smoothing,
-        max_speed=args.max_speed,
-        dip_weight=args.dip_weight,
-    )
+    use_dex = args.retargeter == "dex"
+    if use_dex:
+        retargeter = DexRetargeter(
+            hand_type=args.hand,
+            retargeting_type=args.dex_type,
+            scaling_factor=args.dex_scale,
+            low_pass_alpha=args.dex_alpha,
+            max_speed=args.max_speed,
+        )
+        print(f"리타겟팅: dex-retargeting ({args.dex_type})")
+        print(f"  설정 {os.path.basename(retargeter.config_path)}")
+    else:
+        retargeter = LeapRetargeter(
+            gui=args.pybullet_gui,
+            scale=args.scale,
+            distal_mode=args.distal_mode,
+            smoothing=args.smoothing,
+            max_speed=args.max_speed,
+            dip_weight=args.dip_weight,
+        )
+        print("리타겟팅: 직접 구현 (손끝 위치 IK)")
 
     model = mujoco.MjModel.from_xml_path(MJCF_SCENE)
     data = mujoco.MjData(model)
@@ -125,7 +148,9 @@ def main() -> int:
 
         viewer = mujoco.viewer.launch_passive(model, data)
 
-    if args.calib_frames:
+    # dex-retargeting 은 손목 프레임을 매 프레임 추정하고 벡터를 맞추므로
+    # 사람마다 다른 엄지 안착 각도가 문제되지 않는다. 캘리브레이션이 필요 없다.
+    if args.calib_frames and not use_dex:
         print(f"\n[엄지 정렬] 손을 **펴서** 카메라에 보여 주세요. {args.calib_frames} 프레임 모읍니다.")
         print("  사람 엄지가 손바닥 대비 놓인 방향은 LEAP 과 크게 다르고 사람마다도 다릅니다.")
         print("  이 자세를 기준으로 삼아야 엄지가 제대로 따라갑니다.")
@@ -188,6 +213,7 @@ def main() -> int:
                 q_prev = q_cmd
                 q_cmd = retargeter.retarget(obs.world, dt=dt)
                 tip_errors.append(float(retargeter.tip_error()[1::2].mean()))
+
                 restarts.append(retargeter.last_restarts)
                 jitter.append(float(np.abs(q_cmd - q_prev).max()))
                 if not args.no_window:
@@ -227,8 +253,11 @@ def main() -> int:
                 tip = np.mean(tip_errors[-30:]) * 1000 if tip_errors else float("nan")
                 jit = np.degrees(np.mean(jitter[-30:])) if jitter else float("nan")
                 rst = np.mean(restarts[-30:]) if restarts else 0.0
+                # dex 는 벡터를 맞추므로 mm 잔차가 같은 뜻이 아니다. 라벨을 구분한다.
+                cost = (f"목적함수 {np.mean(tip_errors[-30:]):7.5f}" if use_dex
+                        else f"손끝잔차 {tip:5.2f} mm  재시도 {rst:3.1f}")
                 msg = (f"{fps:5.1f} fps  검출 {detected}/{frames}"
-                       f"  손끝잔차 {tip:5.2f} mm  지터 {jit:5.2f} deg  재시도 {rst:3.1f}"
+                       f"  {cost}  지터 {jit:5.2f} deg"
                        f"  처리 {np.mean(loop_ms[-30:]):4.1f} ms  접촉 {data.ncon:2d}")
                 if over_current:
                     msg += f"  ! 전류 초과 {over_current}"
@@ -268,16 +297,21 @@ def main() -> int:
     print(f"\n프레임 {frames}, {elapsed:.1f}초, 평균 {frames / max(elapsed, 1e-6):.1f} fps")
     if frames:
         print(f"손 검출률 {detected / frames:.0%}")
-    if tip_errors:
+    if tip_errors and use_dex:
+        t = np.array(tip_errors)
+        print(f"최적화 목적함수 평균 {t.mean():.5f}, 최대 {t.max():.5f}"
+              f" (벡터 오차의 Huber loss. mm 가 아니다)")
+    elif tip_errors:
         t = np.array(tip_errors) * 1000
         print(f"IK 손끝 잔차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm (앞마디는 보조 목표라 제외)")
     if jitter:
         j = np.degrees(np.array(jitter))
         print(f"프레임간 관절각 변화 평균 {j.mean():.2f} deg, 95% {np.percentile(j, 95):.2f} deg,"
               f" 최대 {j.max():.2f} deg")
-        print(f"IK 재시도 평균 {np.mean(restarts):.2f}회/프레임 (0 이면 첫 판에 다 풀렸다는 뜻)")
     if loop_ms:
         print(f"추적+리타겟 처리 평균 {np.mean(loop_ms):.1f} ms, 95% {np.percentile(loop_ms, 95):.1f} ms")
+    if restarts and not use_dex:
+        print(f"IK 재시도 평균 {np.mean(restarts):.2f}회/프레임 (0 이면 첫 판에 다 풀렸다는 뜻)")
     if hand is not None and frozen:
         print(f"전류 초과로 명령을 얼린 프레임 {frozen}회")
     return 0

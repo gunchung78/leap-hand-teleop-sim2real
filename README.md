@@ -170,6 +170,45 @@ python scripts/teleop_mujoco.py --pybullet-gui # IK 목표점까지 보면서
 python scripts/teleop_mujoco.py --real         # 실기까지
 ```
 
+### 리타겟팅 — dex-retargeting 으로 교체
+
+Phase 1 의 리타겟팅은 처음에 공식 `Bidex_VisionPro_Teleop/avp_leap.py` 방식(손끝
+**절대 위치**를 목표로 PyBullet IK)을 따라 직접 구현했다. 아래 "직접 구현" 절에
+그 과정과 거기서 부딪힌 문제들을 기록해 두었다.
+
+결론부터 말하면 이 문제는 이미 잘 풀려 있었다. **[dex-retargeting](https://github.com/dexsuite/dex-retargeting)**
+(AnyTeleop, RSS 2023 / MIT)은 LEAP Hand 설정과 MediaPipe 예제를 이미 갖고 있고,
+로봇 모델은 `dex-urdf` 에서 온다 — Phase 0 에서 MuJoCo menagerie 모델의 출처로
+확인했던 바로 그 저장소다.
+
+접근이 근본적으로 다르다.
+
+| | 직접 구현 | dex-retargeting |
+|---|---|---|
+| 목표 | 손끝의 **절대 위치** | 손목→손끝 **벡터** (dexpilot 은 손끝끼리의 거리까지) |
+| 풀이 | 자코비안 DLS + 재시도 시드 | nlopt 비선형 최적화, Huber loss |
+| 도달 불가능할 때 | 관절 한계에 붙고 시드 갈아탐 → **떨림** | 최소자승으로 타협 |
+| 지터 억제 | 지수평활 + 속도제한 | 이전 프레임 정규화항 + low-pass |
+| 엄지 | 정렬 캘리브레이션 필요 | 불필요 (손목 프레임 매 프레임 추정) |
+
+사람과 LEAP 은 비율이 반대라(손가락/손바닥 폭 사람 1.2~1.4 : LEAP 0.98, 말단 마디
+사람 35% : LEAP 83~89%) 절대 위치 목표는 자주 도달 불가능해진다. 벡터 집합의
+최소자승 해는 언제나 존재하므로 그 실패 모드가 구조적으로 생기지 않는다.
+
+`--retargeter ours` 로 직접 구현한 쪽을 계속 쓸 수 있다. 두 방식을 나란히 비교하는
+용도로 남겨 두었다.
+
+```bash
+git clone --depth 1 https://github.com/dexsuite/dex-urdf.git third_party/dex-urdf
+pip install dex-retargeting torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+---
+
+## 직접 구현한 리타겟팅 (`--retargeter ours`)
+
+여기부터는 교체 전에 만든 쪽의 기록이다. 손끝 절대 위치를 목표로 IK 를 푼다.
+
 ### 기하 — 사람 손과 로봇 손을 같은 방식으로 재기
 
 두 손에 **동일한 규칙으로** 손바닥 좌표계를 세운다. 원점은 검지 MCP와 약지 MCP의
@@ -350,7 +389,8 @@ leap_hand_mapping/
   joint_map.py      매핑 테이블 + 좌표 변환 (순수 numpy, OS 무관)
   real_hand.py      실기 드라이버. 전류 제한 350mA 고정, 전류 상시 감시
   hand_tracker.py   웹캠 -> MediaPipe 21 랜드마크 (로봇을 모른다)
-  retarget.py       랜드마크 -> 16 관절각. 손바닥 좌표계 + 자코비안 DLS IK
+  retarget_dex.py   dex-retargeting 어댑터. 기본 경로
+  retarget.py       직접 구현. 손바닥 좌표계 + 자코비안 DLS IK (--retargeter ours)
 scripts/
   verify_mapping_fk.py       PyBullet(URDF) vs MuJoCo 순기구학 교차검증
   preflight_real_hand.py     실기 사전 점검 (토크를 켜지 않는다)
@@ -363,7 +403,7 @@ scripts/
 docs/
   real_hand_bringup.md   실기 시작 절차
   teleop_howto.md        텔레오퍼레이션 실습 절차
-third_party/             참조용 clone 4종 (아래)
+third_party/             참조용 clone 5종 (아래)
 models/                  MediaPipe 모델 (저장소에 없음, 위 스크립트로 받는다)
 joint_mapping.json       매핑 테이블 내보내기
 ```
@@ -393,6 +433,8 @@ conda create -n leap-hand python=3.10 -y     # ROS2 Humble rclpy 와 같은 버�
 conda activate leap-hand
 pip install "jax[cuda12]" mujoco mujoco-mjx playground pybullet \
             mediapipe opencv-python numpy dynamixel-sdk
+pip install dex-retargeting
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # CPU 빌드로 충분
 
 bash scripts/fetch_mediapipe_model.sh   # MediaPipe 1.x 는 모델을 패키지에 넣지 않는다
 ```
@@ -411,6 +453,7 @@ git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie.git
 git clone --depth 1 https://github.com/leap-hand/Bidex_VisionPro_Teleop.git
 git clone --depth 1 https://github.com/leap-hand/LEAP_Hand_API.git
 git clone --depth 1 https://github.com/google-deepmind/mujoco_playground.git
+git clone --depth 1 https://github.com/dexsuite/dex-urdf.git   # dex-retargeting 자산
 ```
 
 라이선스: 코드 MIT / CAD는 CC BY-NC-SA(비상업).
