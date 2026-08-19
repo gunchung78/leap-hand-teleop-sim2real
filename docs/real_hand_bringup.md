@@ -88,7 +88,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 
 ```bash
 conda activate leap-hand
-cd /home/geon/Project/leap-hand
+cd ~/Project/leap-hand-teleop-sim2real
 python scripts/preflight_real_hand.py
 ```
 
