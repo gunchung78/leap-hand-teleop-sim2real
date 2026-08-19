@@ -47,6 +47,16 @@ from leap_hand_mapping import joint_map as jm
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_URDF_DIR = os.path.join(REPO, "third_party/dex-urdf/robots/hands")
+LEAP_URDF = os.path.join(DEFAULT_URDF_DIR, "leap_hand", "leap_hand_right.urdf")
+
+# MediaPipe 랜드마크 -> dex-urdf 링크 이름. 목표 벡터의 양 끝이 전부 이 다섯 점이다.
+LANDMARK_TO_LINK = {
+    0: "base",
+    4: "thumb_tip_head",
+    8: "index_tip_head",
+    12: "middle_tip_head",
+    16: "ring_tip_head",
+}
 
 # MediaPipe world 랜드마크 좌표계 -> MANO 규약. 공식 예제와 동일한 상수다.
 OPERATOR2MANO_RIGHT = np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]], dtype=float)
@@ -144,8 +154,11 @@ class DexRetargeter:
         self.origin_indices = np.asarray(indices[0, :], dtype=int)
         self.task_indices = np.asarray(indices[1, :], dtype=int)
 
+        self.scaling = float(self.retargeting.optimizer.scaling)
+        self._fk = None          # 지연 초기화. 오차를 안 재면 안 띄운다.
+        self._fk_failed = False
         self._q = np.zeros(jm.NUM_JOINTS)
-        self.last_objective = float("nan")
+        self.last_error = np.zeros(len(self.task_indices))
         self.last_restarts = 0   # 이 구현에는 재시도 개념이 없다. 지표 호환용.
 
     # ------------------------------------------------------------------ 변환
@@ -163,17 +176,10 @@ class DexRetargeter:
 
     def retarget(self, world: np.ndarray, dt: float = 0.02) -> np.ndarray:
         """21 랜드마크 -> 16 관절각(MuJoCo 순서)."""
-        qpos = self.retargeting.retarget(self.reference_vectors(world))
+        target = self.reference_vectors(world)
+        qpos = self.retargeting.retarget(target)
         q = jm.clip_mujoco(np.asarray(qpos)[self.dex_to_mujoco])
-
-        # nlopt 가 도달한 목적함수 값. 벡터 오차의 Huber loss 라 mm 단위는 아니지만
-        # 추종이 무너지면 같이 커지므로 감시 지표로 쓸 수 있다.
-        try:
-            self.last_objective = float(
-                self.retargeting.optimizer.opt.last_optimum_value()
-            )
-        except Exception:
-            self.last_objective = float("nan")
+        self.last_error = self._vector_error(qpos, target)
 
         # 속도 제한만 우리 쪽에서 건다. 평활은 dex-retargeting 안의 low-pass 가 한다.
         # 실기 안전장치라 최적화가 무엇을 내놓든 마지막에 걸려 있어야 한다.
@@ -181,15 +187,75 @@ class DexRetargeter:
         self._q = jm.clip_mujoco(self._q + step)
         return self._q.copy()
 
+    # ------------------------------------------------------------------ 오차
+
+    def _ensure_fk(self):
+        """오차 측정용 순기구학 모델. 최적화에는 쓰지 않는다.
+
+        nlopt 목적함수 값을 지표로 쓰면 안 된다. DexPilot 은 손끝이 서로 가까워지면
+        가중치를 1 에서 200~400 으로 올리는 가중합이라 거리로 해석되지 않는다.
+        그래서 같은 URDF 를 따로 올려 **벡터 오차를 mm 로 직접 잰다**.
+        """
+        if self._fk is not None:
+            return self._fk
+        import pybullet as p
+
+        client = p.connect(p.DIRECT)
+        try:
+            uid = p.loadURDF(LEAP_URDF, [0, 0, 0], [0, 0, 0, 1],
+                             useFixedBase=True, physicsClientId=client)
+        except Exception:
+            # 실패한 클라이언트를 남기면 프레임마다 하나씩 샌다.
+            p.disconnect(physicsClientId=client)
+            raise
+        joint_index, link_index = {}, {}
+        for i in range(p.getNumJoints(uid, physicsClientId=client)):
+            info = p.getJointInfo(uid, i, physicsClientId=client)
+            joint_index[info[1].decode()] = i
+            link_index[info[12].decode()] = i
+        self._fk = (p, client, uid, joint_index, link_index)
+        return self._fk
+
+    def _link_position(self, name: str) -> np.ndarray:
+        p, client, uid, _, link_index = self._fk
+        if name == "base":
+            # base 는 고정 루트라 링크로 잡히지 않는다. 원점이다.
+            return np.zeros(3)
+        state = p.getLinkState(uid, link_index[name], physicsClientId=client)
+        return np.array(state[4])
+
+    def _vector_error(self, qpos: np.ndarray, target: np.ndarray) -> np.ndarray:
+        """목표 벡터 대비 실제 로봇 벡터의 오차(m). 목표 개수만큼."""
+        if self._fk_failed:
+            return np.full(len(self.task_indices), np.nan)
+        try:
+            p, client, uid, joint_index, _ = self._ensure_fk()
+        except Exception as exc:
+            # 한 번 실패하면 다시 시도하지 않는다. 오차 지표만 못 볼 뿐 동작은 한다.
+            self._fk_failed = True
+            print(f"[경고] 오차 측정용 FK 모델을 못 띄웠다: {exc}")
+            return np.full(len(self.task_indices), np.nan)
+
+        for name, value in zip(self.retargeting.joint_names, qpos):
+            if name in joint_index:
+                p.resetJointState(uid, joint_index[name], float(value),
+                                  physicsClientId=client)
+        pos = {i: self._link_position(n) for i, n in LANDMARK_TO_LINK.items()}
+        robot_vec = np.array([
+            pos[int(t)] - pos[int(o)]
+            for o, t in zip(self.origin_indices, self.task_indices)
+        ])
+        return np.linalg.norm(robot_vec - target * self.scaling, axis=1)
+
     # -------------------------------------------------------- 인터페이스 호환
 
     def tip_error(self) -> np.ndarray:
-        """LeapRetargeter 와 자리를 맞추기 위한 것. 여기서는 목적함수 값을 돌려준다.
+        """목표 벡터별 오차(m). LeapRetargeter 와 자리를 맞추기 위한 이름이다.
 
-        dex-retargeting 은 절대 위치가 아니라 벡터를 맞추므로 '손끝 잔차 mm' 라는
-        수치가 같은 뜻을 갖지 않는다. 지표를 섞어 읽지 않도록 이름만 맞춰 둔다.
+        절대 위치가 아니라 **벡터** 오차이므로 ours 쪽 '손끝 잔차' 와 같은 뜻은 아니다.
+        dexpilot 이면 앞 6개가 손끝끼리의 거리, 뒤 4개가 손목->손끝이다.
         """
-        return np.full(8, self.last_objective)
+        return self.last_error
 
     def set_pose(self, q) -> None:
         self._q = jm.clip_mujoco(q)
@@ -205,7 +271,13 @@ class DexRetargeter:
         return False
 
     def close(self) -> None:
-        pass
+        if self._fk is not None:
+            p, client = self._fk[0], self._fk[1]
+            try:
+                p.disconnect(physicsClientId=client)
+            except Exception:
+                pass
+            self._fk = None
 
     def __enter__(self):
         return self
