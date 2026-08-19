@@ -356,6 +356,7 @@ scripts/
   preflight_real_hand.py     실기 사전 점검 (토크를 켜지 않는다)
   sweep_joints.py            관절 순차 구동 (시뮬 / 실기)
   check_hand_tracking.py     웹캠 추적만 확인 (로봇 없이)
+  diag_thumb.py              엄지 리타겟팅 진단 (자세별 목표/잔차/한계관절)
   teleop_mujoco.py           텔레오퍼레이션 본체
   test_retarget_roundtrip.py 리타겟팅 기하 검증 (카메라 없이)
   fetch_mediapipe_model.sh   MediaPipe 모델 내려받기
