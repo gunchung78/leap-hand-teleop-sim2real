@@ -1,0 +1,18 @@
+# 참조용 clone (2.4GB). README 의 안내대로 각자 clone 한다.
+third_party/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Claude Code 로컬 설정 (권한 등, 머신마다 다름)
+.claude/settings.local.json
+
+# 실행 산출물
+*.mp4
+*.gif.tmp
+outputs/
+logs/
+checkpoints/
