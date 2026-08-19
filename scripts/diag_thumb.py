@@ -90,14 +90,18 @@ def main() -> int:
     print("=" * 68)
     print("엄지 진단. 안내대로 자세를 잡아 주세요.")
     print("=" * 68)
-    print(f"\n[1/{len(POSES) + 1}] 캘리브레이션 — 손을 **펴서** 보여 주세요 ({args.hold:.0f}초)")
-    for obs in collect(cap, tracker, args.hold, "calibration", "hold hand OPEN", show):
-        rt.observe_calibration(obs.world)
+    print(f"\n[1/{len(POSES) + 2}] 캘리브레이션 1/2 — 손을 **펴서** 보여 주세요 ({args.hold:.0f}초)")
+    for obs in collect(cap, tracker, args.hold, "calib rest", "hold hand OPEN", show):
+        rt.observe_calibration(obs.world, phase="rest")
+    print(f"\n[2/{len(POSES) + 2}] 캘리브레이션 2/2 — **엄지를 손바닥에 붙여** 주세요 ({args.hold:.0f}초)")
+    for obs in collect(cap, tracker, args.hold, "calib fold", "THUMB onto palm", show):
+        rt.observe_calibration(obs.world, phase="fold")
     if not rt.finish_calibration():
         print("  표본 부족. 손이 안 잡혔습니다. 조명/거리를 확인하세요.")
         cap.release()
         return 1
-    print(f"  보정각 {np.degrees(rt.thumb_align_angle()):.1f} deg")
+    print(f"  보정각 {np.degrees(rt.thumb_align_angle()):.1f} deg"
+          f"   회전축(roll) 결정됨: {'예' if rt.calib_roll_fixed else '아니오 — 접기 자세 실패'}")
     print(f"  LEAP 엄지 안착방향(손바닥계) {np.round(rt.reference.thumb_rest, 3)}")
     print(f"  LEAP 엄지 도달거리 {rt.reference.reach['thumb'] * 1000:.1f} mm,"
           f" 말단마디 {rt.reference.distal_length['thumb'] * 1000:.1f} mm")
@@ -111,8 +115,8 @@ def main() -> int:
     print("-" * 68)
 
     rows = []
-    for i, (label, hint) in enumerate(POSES, start=2):
-        print(f"\n[{i}/{len(POSES) + 1}] {label} — {hint} ({args.hold:.0f}초)", flush=True)
+    for i, (label, hint) in enumerate(POSES, start=3):
+        print(f"\n[{i}/{len(POSES) + 2}] {label} — {hint} ({args.hold:.0f}초)", flush=True)
         frames = collect(cap, tracker, args.hold, label, hint, show)
         if len(frames) < 5:
             print(f"  검출 {len(frames)}프레임 — 건너뜀")
@@ -170,7 +174,9 @@ def main() -> int:
     print("  목표거리 > 도달거리   -> 스케일 문제. --scale 로 줄인다")
     print("  한계관절이 매번 같음  -> 방향이 작업공간 밖. 캘리브레이션을 다시 잡는다")
     print("  재시도 5.0 고정       -> IK 가 목표에 못 간다. 위 둘 중 하나가 원인")
-    print("  잔차는 작은데 이상함  -> 목표 자체가 틀린 것. 사람 엄지 랜드마크를 의심")
+    print("  잔차는 작은데 이상함  -> 목표 자체가 틀린 것. roll 결정 여부부터 확인")
+    print("  th_cmc/th_axl 이 -0.35 -> 벌림 관절이 하한에 붙었다. 접기가 엉뚱한 축으로")
+    print("                            새고 있다는 신호. 접기 캘리브레이션을 다시.")
     return 0
 
 
