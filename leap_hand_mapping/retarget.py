@@ -83,6 +83,10 @@ EE_LANDMARKS = {
 
 FINGERS = ["index", "middle", "ring", "thumb"]
 
+# LEAP 의 '접는 방향'을 재는 굽힘각(rad). th_mcp / th_ipl 에 같이 준다.
+# 1.0 근처에서 손끝이 손바닥 평면 안을 손가락 쪽으로 쓸며 대립 자세가 된다.
+THUMB_FOLD_PROBE = 1.0
+
 # MuJoCo 관절 순서에서 손가락별 4개 자유도.
 # 손가락끼리는 운동학적으로 독립이라 자코비안이 블록대각이고, 따라서 IK 실패도
 # 손가락 단위로 일어난다. 실패한 손가락만 다른 시드로 다시 푸는 데 쓴다.
@@ -166,6 +170,7 @@ class LeapReference:
     root: dict = field(default_factory=dict)            # 손가락별 뿌리 링크 원점
     reach: dict = field(default_factory=dict)           # 뿌리 -> 손끝 직선거리 (영점 자세)
     thumb_rest: np.ndarray | None = None                # 손바닥 좌표계에서 본 엄지 안착 방향
+    thumb_fold: np.ndarray | None = None                # 안착 방향에서 '접는' 쪽으로의 접선방향
 
 
 class LeapRetargeter:
@@ -272,8 +277,10 @@ class LeapRetargeter:
         self.last_restarts = 0
         self.thumb_align = np.eye(3)
         self.frozen_scales: dict | None = None
-        self._calib: list = []
+        self._calib: list = []            # 편 손: 엄지 안착 방향 표본
+        self._calib_fold: list = []       # 엄지 접은 손: 접는 방향 표본
         self._calib_scales: list = []
+        self.calib_roll_fixed = False     # roll 까지 정해졌나 (2자세를 다 봤나)
         self._debug_balls: list[int] = []
         if gui:
             self._create_debug_balls()
@@ -312,6 +319,31 @@ class LeapRetargeter:
         # 앞마디(thumb_fingertip)로 재면 마지막 마디만큼 어긋나서, 편 손인데도
         # th_cmc/th_axl 이 하한에 붙는다(실측).
         thumb_rest = rotation.T @ (self._link_origin(EE_LINKS["thumb"][1]) - root["thumb"])
+        thumb_rest = thumb_rest / np.linalg.norm(thumb_rest)
+
+        # LEAP 이 엄지를 '접는' 방향을 URDF 에서 직접 잰다.
+        #
+        # 안착 방향만으로는 정렬 회전이 정해지지 않는다. 벡터 하나를 벡터 하나로
+        # 보내는 회전은 그 축을 중심으로 한 roll 만큼 자유도가 남는다(3 중 2 만 고정).
+        # 실측으로 확인했다: roll 을 0/90/180/270 어느 값으로 잡아도 안착 방향은
+        # 똑같이 맞고, 12 개 roll 전부 LEAP 작업공간 안에 들어간다. 즉 잔차는 작은데
+        # 엄지가 엉뚱한 축으로 움직인다. 사람이 손바닥 쪽으로 접는 동작이 th_mcp(굽힘)
+        # 대신 th_cmc(벌림) 로 흘러들어가 "접어도 안 접히는" 증상이 된다.
+        #
+        # 그래서 방향을 하나 더 잡는다. 굽힘 관절(th_mcp, th_ipl)을 굽혔을 때 손끝
+        # **단위방향**이 어디로 움직이는지가 LEAP 의 접는 방향이다. 길이가 아니라
+        # 방향의 접선성분이라 사람/로봇 크기 차이를 타지 않는다.
+        for j in (14, 15):
+            self.p.resetJointState(self.uid, self.dof_indices[j], THUMB_FOLD_PROBE,
+                                   physicsClientId=self.client)
+        folded = rotation.T @ (self._link_origin(EE_LINKS["thumb"][1]) - root["thumb"])
+        folded = folded / np.linalg.norm(folded)
+        for j in (14, 15):
+            self.p.resetJointState(self.uid, self.dof_indices[j], 0.0,
+                                   physicsClientId=self.client)
+        thumb_fold = folded - np.dot(folded, thumb_rest) * thumb_rest
+        thumb_fold = thumb_fold / np.linalg.norm(thumb_fold)
+
         return LeapReference(
             origin=origin,
             rotation=rotation,
@@ -319,7 +351,8 @@ class LeapRetargeter:
             distal_length=distal,
             root=root,
             reach=reach,
-            thumb_rest=thumb_rest / np.linalg.norm(thumb_rest),
+            thumb_rest=thumb_rest,
+            thumb_fold=thumb_fold,
         )
 
     def human_frame(self, world: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
@@ -425,14 +458,24 @@ class LeapRetargeter:
             targets.append(tip)
         return np.array(targets)
 
-    def observe_calibration(self, world: np.ndarray) -> None:
-        """엄지 정렬용 표본을 모은다. 손을 편 상태로 몇 프레임 넣어 준다."""
+    def observe_calibration(self, world: np.ndarray, phase: str = "rest") -> None:
+        """엄지 정렬용 표본을 모은다.
+
+        phase="rest"  손을 편 자세. 엄지 안착 방향을 잰다.
+        phase="fold"  엄지를 손바닥에 붙인 자세. 접는 방향을 잰다.
+
+        두 자세가 다 필요한 이유는 finish_calibration 의 설명을 볼 것.
+        """
         _, h_rot, _ = self.human_frame(world)
         # compute_targets 가 쓰는 것과 **같은 축**이어야 한다. CMC->IP 로 재고
         # CMC->TIP 로 목표를 만들면 마지막 마디만큼 어긋난다.
         d = h_rot.T @ (world[ht.THUMB_TIP] - world[ht.THUMB_CMC])
         n = np.linalg.norm(d)
-        if n > 1e-6:
+        if n < 1e-6:
+            return
+        if phase == "fold":
+            self._calib_fold.append(d / n)
+        else:
             self._calib.append(d / n)
             self._calib_scales.append(self.measure_scales(world))
 
@@ -447,16 +490,55 @@ class LeapRetargeter:
         40mm 대에서 안 내려간다. 목표 가중치를 조정해도(엄지 TIP 만 써도) 그대로다
         — 거리 문제가 아니라 **방향이 작업공간 밖**이기 때문이다.
 
-        사람마다 엄지 안착 각도가 다르므로 상수로 박을 수 없다. 손을 편 자세를
-        몇 프레임 보고, 그때의 엄지 방향을 LEAP 의 안착 방향으로 보내는 최소
-        회전을 구해 둔다. 이후 엄지 움직임은 그 기준에서의 편차로 전달된다.
+        사람마다 엄지 안착 각도가 다르므로 상수로 박을 수 없다.
+
+        왜 자세가 두 개인가
+        ------------------
+        처음에는 편 손 하나만 보고 `rotation_between(사람 안착방향, LEAP 안착방향)`
+        을 썼다. 이건 **틀렸다.** 벡터 하나를 벡터 하나로 보내는 회전은 그 축을
+        중심으로 한 roll 만큼 자유도가 남는다 — 3 중 2 만 정해진다. 실측:
+
+            roll   0/90/180/270 deg  -> 넷 다 안착 방향은 정확히 일치
+            그 상태로 엄지를 50도 접으면 목표 방향이 전부 다른 곳으로 간다
+            12 개 roll 전부 LEAP 작업공간 안 (최근접 0.3~7.1 deg)
+
+        즉 잔차는 작게 나오는데 엄지가 엉뚱한 축으로 움직인다. 진단에도 안 걸린다.
+        LEAP 엄지의 굽힘(th_mcp/th_ipl)은 손끝을 손바닥 **평면 안에서** 손가락 쪽으로
+        보내고(이동방향 [0.29, 0.96, 0.01]), th_cmc 는 평면 **밖으로** 보낸다
+        ([0.30, 0.01, -0.96]). roll 이 틀어지면 사람의 '손바닥으로 접기'가 th_mcp 가
+        아니라 th_cmc 로 흘러들어가 **접어도 안 접힌다.**
+
+        그래서 방향을 하나 더 받는다. 편 손(안착)과 엄지를 손바닥에 붙인 손(접기),
+        두 쌍으로 회전 3 자유도를 전부 고정한다.
         """
         if len(self._calib) < 5:
             return False
-        mean = np.mean(self._calib, axis=0)
-        if np.linalg.norm(mean) < 1e-6:
+        rest = np.mean(self._calib, axis=0)
+        if np.linalg.norm(rest) < 1e-6:
             return False
-        self.thumb_align = rotation_between(mean, self.reference.thumb_rest)
+        rest = rest / np.linalg.norm(rest)
+
+        fold = None
+        if len(self._calib_fold) >= 5:
+            f = np.mean(self._calib_fold, axis=0)
+            # 안착 방향에 직교하는 성분만 남긴다. 접는 '접선방향'이다.
+            f = f - np.dot(f, rest) * rest
+            if np.linalg.norm(f) > 0.15:      # 두 자세가 충분히 다른가
+                fold = f / np.linalg.norm(f)
+
+        if fold is not None:
+            # 방향 두 쌍으로 회전을 완전히 정한다.
+            # 열이 (x=접는방향, y=안착방향, z=나머지) 인 정규직교 프레임을
+            # 사람과 LEAP 양쪽에 만들고, 사람 프레임을 LEAP 프레임으로 보낸다.
+            f_human = orthonormal_frame(fold, rest)
+            f_leap = orthonormal_frame(self.reference.thumb_fold, self.reference.thumb_rest)
+            self.thumb_align = f_leap @ f_human.T
+            self.calib_roll_fixed = True
+        else:
+            # 자세가 하나뿐이면 roll 이 미결정인 채로 남는다. 엄지가 움직이긴 해도
+            # 접는 축이 틀어질 수 있다. 아래 설명 참고.
+            self.thumb_align = rotation_between(rest, self.reference.thumb_rest)
+            self.calib_roll_fixed = False
 
         # 배율을 여기서 고정한다.
         #
@@ -472,6 +554,7 @@ class LeapRetargeter:
             for f in FINGERS
         }
         self._calib = []
+        self._calib_fold = []
         self._calib_scales = []
         return True
 

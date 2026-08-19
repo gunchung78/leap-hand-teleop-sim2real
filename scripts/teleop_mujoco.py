@@ -151,30 +151,63 @@ def main() -> int:
     # dex-retargeting 은 손목 프레임을 매 프레임 추정하고 벡터를 맞추므로
     # 사람마다 다른 엄지 안착 각도가 문제되지 않는다. 캘리브레이션이 필요 없다.
     if args.calib_frames and not use_dex:
-        print(f"\n[엄지 정렬] 손을 **펴서** 카메라에 보여 주세요. {args.calib_frames} 프레임 모읍니다.")
-        print("  사람 엄지가 손바닥 대비 놓인 방향은 LEAP 과 크게 다르고 사람마다도 다릅니다.")
-        print("  이 자세를 기준으로 삼아야 엄지가 제대로 따라갑니다.")
-        collected = 0
-        t_calib = time.time()
-        while collected < args.calib_frames and time.time() - t_calib < 30:
-            ok, frame = cap.read()
-            if not ok:
-                continue
-            frame = tracker.preprocess(frame)
-            obs = tracker.process(frame)
-            if obs is not None:
-                retargeter.observe_calibration(obs.world)
-                collected += 1
+        # 자세 두 개를 받는다. 하나로는 정렬 회전의 roll 이 안 정해진다 —
+        # 벡터 하나를 벡터 하나로 보내는 회전은 그 축 둘레로 자유도가 남는다.
+        # 그러면 엄지가 움직이긴 해도 '접기'가 th_mcp 대신 th_cmc(벌림) 로 새서
+        # 손바닥으로 접어도 안 접힌다. 자세한 근거는 retarget.finish_calibration.
+        CALIB_POSES = [
+            ("rest", "손을 **펴서** 보여 주세요",
+             "엄지가 손바닥 대비 놓인 기준 방향을 잡습니다"),
+            ("fold", "**엄지를 손바닥에 붙여** 주세요 (네 손가락은 편 채로)",
+             "엄지가 접히는 방향을 잡습니다. 이게 있어야 접기가 접힘 관절로 갑니다"),
+        ]
+        calib_ok = True
+        for phase, title, why in CALIB_POSES:
+            print(f"\n[엄지 정렬 - {phase}] {title}")
+            print(f"  {why}. {args.calib_frames} 프레임 모읍니다.")
+            for n in (3, 2, 1):
+                print(f"  {n}...", flush=True)
+                t_wait = time.time()
+                while time.time() - t_wait < 1.0:
+                    ok, frame = cap.read()
+                    if ok and not args.no_window:
+                        frame = tracker.preprocess(frame)
+                        cv2.putText(frame, f"{phase.upper()} in {n}", (10, 30),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 200, 255), 2)
+                        cv2.putText(frame, title.replace("**", ""), (10, 65),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 1)
+                        cv2.imshow("teleop", frame)
+                        cv2.waitKey(1)
+            collected = 0
+            t_calib = time.time()
+            while collected < args.calib_frames and time.time() - t_calib < 30:
+                ok, frame = cap.read()
+                if not ok:
+                    continue
+                frame = tracker.preprocess(frame)
+                obs = tracker.process(frame)
+                if obs is not None:
+                    retargeter.observe_calibration(obs.world, phase=phase)
+                    collected += 1
+                    if not args.no_window:
+                        ht.draw_landmarks(frame, obs)
                 if not args.no_window:
-                    ht.draw_landmarks(frame, obs)
-            if not args.no_window:
-                cv2.putText(frame, f"calibrating thumb {collected}/{args.calib_frames}",
-                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
-                cv2.imshow("teleop", frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                    cv2.putText(frame, f"{phase} {collected}/{args.calib_frames}",
+                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+                    cv2.imshow("teleop", frame)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+            if collected < 5:
+                print(f"  검출 {collected}프레임 — 표본 부족")
+                calib_ok = False
+
         if retargeter.finish_calibration():
-            print(f"  완료. 보정각 {np.degrees(retargeter.thumb_align_angle()):.1f} deg\n")
+            print(f"  완료. 보정각 {np.degrees(retargeter.thumb_align_angle()):.1f} deg")
+            if retargeter.calib_roll_fixed:
+                print("  두 자세를 다 받아 정렬 회전이 완전히 정해졌습니다.\n")
+            else:
+                print("  경고: 접기 자세를 못 받았습니다. 회전축(roll)이 미결정이라")
+                print("        엄지가 움직여도 접히는 축이 틀어질 수 있습니다.\n")
         else:
             print("  표본이 부족해 건너뜁니다. 엄지 정확도가 떨어집니다.\n")
 
