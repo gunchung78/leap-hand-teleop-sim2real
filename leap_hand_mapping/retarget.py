@@ -271,7 +271,9 @@ class LeapRetargeter:
         self._last_targets: np.ndarray | None = None
         self.last_restarts = 0
         self.thumb_align = np.eye(3)
+        self.frozen_scales: dict | None = None
         self._calib: list = []
+        self._calib_scales: list = []
         self._debug_balls: list[int] = []
         if gui:
             self._create_debug_balls()
@@ -306,7 +308,10 @@ class LeapRetargeter:
             for f in FINGERS
         }
         rotation = orthonormal_frame(across, along)
-        thumb_rest = rotation.T @ (self._link_origin(EE_LINKS["thumb"][0]) - root["thumb"])
+        # 목표를 손끝으로 앵커하므로 안착 방향도 손끝(realtip)까지 재야 한다.
+        # 앞마디(thumb_fingertip)로 재면 마지막 마디만큼 어긋나서, 편 손인데도
+        # th_cmc/th_axl 이 하한에 붙는다(실측).
+        thumb_rest = rotation.T @ (self._link_origin(EE_LINKS["thumb"][1]) - root["thumb"])
         return LeapReference(
             origin=origin,
             rotation=rotation,
@@ -325,7 +330,7 @@ class LeapRetargeter:
         width = float(np.linalg.norm(across))
         return origin, orthonormal_frame(across, along), width
 
-    def finger_scales(self, world: np.ndarray) -> dict:
+    def measure_scales(self, world: np.ndarray) -> dict:
         """손가락별 사람->로봇 길이 배율.
 
         왜 손바닥 폭 하나로 안 되는가
@@ -353,6 +358,10 @@ class LeapRetargeter:
             )
             scales[f] = self.reference.reach[f] / max(length, 1e-6)
         return scales
+
+    def finger_scales(self, world: np.ndarray) -> dict:
+        """실제로 쓰는 배율. 캘리브레이션을 했으면 그때 고정한 값이다."""
+        return self.frozen_scales if self.frozen_scales else self.measure_scales(world)
 
     def compute_targets(self, world: np.ndarray) -> np.ndarray:
         """21 랜드마크 -> IK 목표점 8개 (LEAP base 프레임, 미터). 순서는 EE_LINKS 와 같다.
@@ -419,10 +428,13 @@ class LeapRetargeter:
     def observe_calibration(self, world: np.ndarray) -> None:
         """엄지 정렬용 표본을 모은다. 손을 편 상태로 몇 프레임 넣어 준다."""
         _, h_rot, _ = self.human_frame(world)
-        d = h_rot.T @ (world[ht.THUMB_IP] - world[ht.THUMB_CMC])
+        # compute_targets 가 쓰는 것과 **같은 축**이어야 한다. CMC->IP 로 재고
+        # CMC->TIP 로 목표를 만들면 마지막 마디만큼 어긋난다.
+        d = h_rot.T @ (world[ht.THUMB_TIP] - world[ht.THUMB_CMC])
         n = np.linalg.norm(d)
         if n > 1e-6:
             self._calib.append(d / n)
+            self._calib_scales.append(self.measure_scales(world))
 
     def finish_calibration(self) -> bool:
         """모은 표본으로 엄지 정렬 회전을 확정한다.
@@ -445,7 +457,22 @@ class LeapRetargeter:
         if np.linalg.norm(mean) < 1e-6:
             return False
         self.thumb_align = rotation_between(mean, self.reference.thumb_rest)
+
+        # 배율을 여기서 고정한다.
+        #
+        # 마디 길이의 합은 원래 자세와 무관해야 하지만, MediaPipe 는 손가락을
+        # 굽히면(특히 엄지) 가려짐 때문에 사슬을 짧게 추정한다. 실측에서 엄지
+        # 배율이 편 손 1.67 -> 주먹 1.38 로 21% 흔들렸다. 매 프레임 다시 재면
+        # 굽힐수록 로봇 손가락이 덜 뻗는다.
+        #
+        # 캘리브레이션 자세(편 손)는 가려짐이 가장 적어 길이를 가장 잘 잰다.
+        # 그때 값을 붙박이로 쓴다.
+        self.frozen_scales = {
+            f: float(np.mean([s[f] for s in self._calib_scales]))
+            for f in FINGERS
+        }
         self._calib = []
+        self._calib_scales = []
         return True
 
     def thumb_align_angle(self) -> float:

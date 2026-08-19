@@ -28,9 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 from leap_hand_mapping import joint_map as jm  # noqa: E402
 from leap_hand_mapping.retarget import (  # noqa: E402
-    EE_LANDMARKS,
+    FINGERS,
     FINGER_JOINTS,
-    HUMAN_CHAIN,
     LeapRetargeter,
 )
 
@@ -122,14 +121,18 @@ def main() -> int:
         # 가운데 프레임들만 쓴다. 자세를 바꾸는 동안이 섞이지 않게.
         sample = frames[len(frames) // 3: 2 * len(frames) // 3] or frames
         scales, dists, resid, restarts, q_last = [], [], [], [], None
+        per_finger = []
         for obs in sample:
             rt.reset()
             q_last = rt.retarget(obs.world)
-            scales.append(rt.finger_scales(obs.world)["thumb"])
+            scales.append(rt.measure_scales(obs.world)["thumb"])
             tg = rt.compute_targets(obs.world)
             dists.append(np.linalg.norm(tg[7] - rt.reference.root["thumb"]))
-            resid.append(rt.tip_error()[7])
+            err = rt.tip_error()
+            resid.append(err[7])
+            per_finger.append(err[1::2])
             restarts.append(rt.last_restarts)
+        per_finger = np.mean(per_finger, axis=0)
 
         pinned = [
             jm.MUJOCO_JOINT_NAMES[j]
@@ -137,7 +140,7 @@ def main() -> int:
             if abs(q_last[j] - lo[j]) < 1e-3 or abs(q_last[j] - hi[j]) < 1e-3
         ]
         rows.append((label, np.mean(scales), np.mean(dists), np.mean(resid),
-                     np.mean(restarts), pinned, q_last[tj].copy()))
+                     np.mean(restarts), pinned, q_last[tj].copy(), per_finger))
 
     cap.release()
     tracker.close()
@@ -150,10 +153,17 @@ def main() -> int:
     print(f"보정각 {np.degrees(rt.thumb_align_angle()):.1f} deg,"
           f" LEAP 엄지 도달거리 {rt.reference.reach['thumb'] * 1000:.1f} mm")
     print(f"{'자세':<16} {'배율':>5} {'목표거리':>9} {'손끝잔차':>9} {'재시도':>6}  한계관절")
-    for label, sc, d, r, rs, pinned, q in rows:
+    for label, sc, d, r, rs, pinned, q, pf in rows:
         print(f"{label:<16} {sc:>5.2f} {d * 1000:>8.1f}mm {r * 1000:>8.1f}mm {rs:>6.1f}  "
               f"{','.join(pinned) if pinned else '-'}")
-    for label, sc, d, r, rs, pinned, q in rows:
+    print(f"\n측정 배율(고정값 {'사용중' if rt.frozen_scales else '없음'}):"
+          f" {' '.join(f'{f}={rt.frozen_scales[f]:.2f}' for f in FINGERS) if rt.frozen_scales else '-'}")
+    print(f"\n손가락별 손끝 잔차 (재시도를 누가 일으키는지)")
+    print(f"  {'자세':<14} " + " ".join(f"{f:>9}" for f in FINGERS))
+    for label, sc, d, r, rs, pinned, q, pf in rows:
+        print(f"  {label:<14} " + " ".join(f"{v * 1000:>8.1f}mm" for v in pf))
+    print()
+    for label, sc, d, r, rs, pinned, q, pf in rows:
         print(f"  {label:<14} th_cmc/axl/mcp/ipl = {np.round(q, 2)}")
 
     print("\n읽는 법")

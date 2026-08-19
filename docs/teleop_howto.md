@@ -18,6 +18,9 @@ cd ~/Project/leap-hand-teleop-sim2real
 
 bash scripts/fetch_mediapipe_model.sh    # 7.5MB. 저장소에 없다
 ls /dev/video*                           # 웹캠 확인
+
+# dex-retargeting 자산 (기본 리타겟터가 쓴다)
+git clone --depth 1 https://github.com/dexsuite/dex-urdf.git third_party/dex-urdf
 ```
 
 MediaPipe 1.x 는 legacy `mp.solutions.hands` 를 없앴고 tasks API 만 남았는데,
@@ -118,7 +121,10 @@ python scripts/teleop_mujoco.py
 
 창이 둘 뜬다. 카메라 창과 MuJoCo 뷰어.
 
-**먼저 엄지 정렬 캘리브레이션이 돈다.** 손을 **펴서** 카메라에 보여 주면 30프레임을
+기본 리타겟터는 **dex-retargeting** 이고 캘리브레이션이 필요 없다. 바로 시작한다.
+`--dex-type vector` 로 단순한 쪽(손목→손끝 벡터만)과 비교할 수 있다.
+
+직접 구현한 쪽을 쓰려면 `--retargeter ours`. 그때는 **엄지 정렬 캘리브레이션이 돈다.** 손을 **펴서** 카메라에 보여 주면 30프레임을
 모으고 보정각을 출력한다. 사람 엄지가 손바닥 대비 놓인 방향은 LEAP 과 최대 124°
 어긋나고 사람마다도 달라서, 이 기준을 잡아야 엄지가 따라간다. 끝나면 본 루프가
 시작된다. `q`(카메라 창 포커스) 또는 Ctrl-C 로 종료.
@@ -164,6 +170,11 @@ python scripts/teleop_mujoco.py
 편 자세에서 ±7.7° 밖에 못 벌린다. 실기를 붙이기 전에 이 자세를 피하는 게 좋다.
 
 ### 엄지가 이상할 때
+
+먼저 `--retargeter ours` 를 쓰고 있는지 본다. 기본(dex-retargeting)은 손목 프레임을
+매 프레임 추정하고 벡터를 맞추므로 엄지 캘리브레이션 자체가 없다.
+
+`ours` 쪽 엄지 진단:
 
 ```bash
 python scripts/diag_thumb.py
@@ -214,10 +225,12 @@ PyBullet 창이 하나 더 뜨고, IK 가 쫓고 있는 **목표점 8개**가 �
 | 로봇이 과하게 굽음 | `--scale 2.0` 처럼 1단계 값보다 작게 |
 | 로봇이 덜 굽음 | `--scale 2.5` 처럼 크게 |
 | 검출이 자꾸 끊김 | 조명·거리 먼저. 그래도면 `--width 1280 --height 720` |
-| 엄지만 엉뚱함 | `python scripts/diag_thumb.py` 로 원인을 가른다 |
-| 떨리는데 재시도가 0 | `--smoothing 0.2` |
-| 떨리는데 재시도가 5.0 | `--dip-weight 0.15` (자세는 조금 느슨해진다) |
-| 자세가 부자연스러움 | `--dip-weight 0.5` ~ `1.0` (대신 지터가 는다) |
+| 로봇이 덜 움직임 (dex) | `--dex-scale 1.2` 처럼 낮춘다 (기본 1.6) |
+| 떨림 (dex) | `--dex-alpha 0.1` (기본 0.2, 작을수록 부드럽고 느리다) |
+| 집기가 부정확 (dex) | `--dex-type dexpilot` 인지 확인. `vector` 는 손끝간 거리를 안 본다 |
+| 엄지만 엉뚱함 (ours) | `python scripts/diag_thumb.py` 로 원인을 가른다 |
+| 떨리는데 재시도가 0 (ours) | `--smoothing 0.2` |
+| 떨리는데 재시도가 5.0 (ours) | `--dip-weight 0.15` (자세는 조금 느슨해진다) |
 
 `--dip-weight` 는 앞마디 목표의 가중치다(손끝은 항상 1.0). 낮추면 지터가 줄고
 자세가 느슨해진다. 1.0 / 0.3(기본) / 0.15 에서 정지 지터가 7.1° / 4.7° / 2.5°,
