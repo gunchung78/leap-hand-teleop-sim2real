@@ -59,6 +59,15 @@ LANDMARK_TO_LINK = {
 }
 
 # MediaPipe world 랜드마크 좌표계 -> MANO 규약. 공식 예제와 동일한 상수다.
+# dex-retargeting 의 LEAP 기본 설정은 1.6 이다. 이 저장소의 카메라/손으로 실측하니
+# 그 값은 항상 포화됐다 (scripts/tune_dex_scale.py, 339프레임):
+#   손목->손끝 최대  엄지 147 / 검지 186 / 중지 195 / 약지 189 mm
+#   LEAP 도달거리    엄지 177 / 검지 234 / 중지 229 / 약지 233 mm
+#   -> 포화가 시작되지 않는 배율은 1.17 ~ 1.26
+# 배율별 벡터오차·관절 가동폭도 같은 지점을 가리켰다 (1.0 에서 오차 최소·가동폭 최대).
+# 손 크기가 다르면 tune_dex_scale.py 를 다시 돌려 이 값을 고칠 것.
+DEFAULT_SCALING = 1.0
+
 OPERATOR2MANO_RIGHT = np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]], dtype=float)
 OPERATOR2MANO_LEFT = np.array([[0, 0, -1], [1, 0, 0], [0, -1, 0]], dtype=float)
 
@@ -100,7 +109,7 @@ class DexRetargeter:
         hand_type: str = "Right",
         retargeting_type: str = "dexpilot",
         urdf_dir: str = DEFAULT_URDF_DIR,
-        scaling_factor: float | None = None,
+        scaling_factor: float | None = DEFAULT_SCALING,
         low_pass_alpha: float | None = None,
         max_speed: float = 8.0,
     ) -> None:

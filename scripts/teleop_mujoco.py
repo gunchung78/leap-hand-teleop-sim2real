@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--dex-type", default="dexpilot", choices=["dexpilot", "vector"],
                     help="dexpilot 은 손끝끼리의 거리까지 목표에 넣는다 (집기에 유리)")
     ap.add_argument("--dex-scale", type=float, default=None,
-                    help="dex-retargeting 의 scaling_factor 덮어쓰기 (기본 1.6)")
+                    help="dex-retargeting 의 scaling_factor 덮어쓰기 (기본 1.0, 실측값)")
     ap.add_argument("--dex-alpha", type=float, default=None,
                     help="dex-retargeting low-pass 계수 덮어쓰기 (기본 0.2, 작을수록 부드럽다)")
 
