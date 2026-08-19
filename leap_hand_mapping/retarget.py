@@ -193,6 +193,7 @@ class LeapRetargeter:
         ik_damping: float = 0.02,
         ik_max_step: float = 0.3,
         restart_threshold: float = 0.003,
+        restart_ratio: float = 2.5,
         dip_weight: float = 0.3,
         smoothing: float = 0.4,
         max_speed: float = 8.0,
@@ -211,6 +212,8 @@ class LeapRetargeter:
         self.ik_damping = ik_damping
         self.ik_max_step = ik_max_step
         self.restart_threshold = restart_threshold
+        self.restart_ratio = restart_ratio
+        self._residual_ema: dict = {}
         # 목표 8개의 가중치. 손끝이 본 목표이고 앞마디는 자세를 잡아 주는 보조다.
         #
         # 앞마디 목표는 손끝에서 LEAP 말단 마디 길이만큼 되짚어 만든 점이라,
@@ -458,6 +461,24 @@ class LeapRetargeter:
             targets.append(tip)
         return np.array(targets)
 
+    # 왜 엄지만 안 맞는가 (실측 결론)
+    # ------------------------------
+    # 네 손가락은 손끝 잔차 0.5mm 로 거의 완벽하다. 엄지만 4~13mm 다. 그런데 잔차는
+    # 증상이 아니다. 기능으로 재면 이렇다 — 사용자가 핀치를 하는 동안:
+    #
+    #     사람 엄지-검지 손끝 간격 (배율 적용)   102.9mm
+    #     LEAP 이 실제로 만든 간격              150.0mm
+    #     LEAP 이 낼 수 있는 최소 간격            0.3mm   <- 할 수 있는데 안 한다
+    #
+    # 이 방식은 손가락마다 **자기 뿌리를 원점으로, 자기 길이 배율로** 목표를 만든다.
+    # 손가락끼리 아무 연결이 없다. 배율도 서로 다르다(실측: 검지 1.91, 엄지 1.57).
+    # 그래서 두 손끝이 사람에서 맞닿아도 로봇에서는 안 맞닿는다. 각자 자기 목표에는
+    # 정확히 갔는데도 그렇다. 잔차를 아무리 낮춰도 이건 안 고쳐진다 — 목표 집합에
+    # "엄지와 검지가 만난다" 라는 조건 자체가 없기 때문이다.
+    #
+    # dex-retargeting 의 DexPilot 이 손끝 **사이 거리**를 가중치 200~400 으로 목표에
+    # 넣는 이유가 이것이다. 조작에서 중요한 것은 절대 위치가 아니라 손끝끼리의 관계다.
+
     def observe_calibration(self, world: np.ndarray, phase: str = "rest") -> None:
         """엄지 정렬용 표본을 모은다.
 
@@ -492,24 +513,27 @@ class LeapRetargeter:
 
         사람마다 엄지 안착 각도가 다르므로 상수로 박을 수 없다.
 
-        왜 자세가 두 개인가
-        ------------------
-        처음에는 편 손 하나만 보고 `rotation_between(사람 안착방향, LEAP 안착방향)`
-        을 썼다. 이건 **틀렸다.** 벡터 하나를 벡터 하나로 보내는 회전은 그 축을
-        중심으로 한 roll 만큼 자유도가 남는다 — 3 중 2 만 정해진다. 실측:
+        roll 은 왜 미결정이고, 왜 그냥 두는가
+        ----------------------------------
+        `rotation_between(사람 안착방향, LEAP 안착방향)` 은 벡터 하나를 벡터 하나로
+        보내는 최소 회전이라 3 자유도 중 2 개만 정한다. 그 축 둘레의 roll 이 남는다:
 
-            roll   0/90/180/270 deg  -> 넷 다 안착 방향은 정확히 일치
-            그 상태로 엄지를 50도 접으면 목표 방향이 전부 다른 곳으로 간다
-            12 개 roll 전부 LEAP 작업공간 안 (최근접 0.3~7.1 deg)
+            roll 0/90/180/270 deg -> 넷 다 안착 방향은 정확히 일치
+            12 개 roll 전부 LEAP 작업공간 안 (최근접각 0.3~7.1 deg)
 
-        즉 잔차는 작게 나오는데 엄지가 엉뚱한 축으로 움직인다. 진단에도 안 걸린다.
-        LEAP 엄지의 굽힘(th_mcp/th_ipl)은 손끝을 손바닥 **평면 안에서** 손가락 쪽으로
-        보내고(이동방향 [0.29, 0.96, 0.01]), th_cmc 는 평면 **밖으로** 보낸다
-        ([0.30, 0.01, -0.96]). roll 이 틀어지면 사람의 '손바닥으로 접기'가 th_mcp 가
-        아니라 th_cmc 로 흘러들어가 **접어도 안 접힌다.**
+        그래서 자세를 하나 더 받아(편 손 + 엄지 접기) roll 까지 정하는 안을 만들고
+        실측 손 녹화로 A/B 했다. **거의 차이가 없었다.**
 
-        그래서 방향을 하나 더 받는다. 편 손(안착)과 엄지를 손바닥에 붙인 손(접기),
-        두 쌍으로 회전 3 자유도를 전부 고정한다.
+            캘리브레이션      핀치 때 엄지-검지 간격   엄지 잔차
+            1 자세                    154.2mm        12.2mm
+            2 자세(핀치로 roll 고정)     150.0mm        13.3mm
+
+        사람 엄지는 CMC(손목 근처)에서 보면 손바닥에 붙여도 방향이 5.8 도밖에 안
+        변한다(실측: 편 손 88.8mm -> 접은 손 90.8mm, 거의 그대로). 두 번째 자세가
+        관측량으로 너무 약하다. 사용자에게 자세를 더 시킬 값어치가 없어 1 자세로
+        되돌렸다. `observe_calibration(w, phase="fold")` 경로는 남겨 두었다.
+
+        진짜 한계는 roll 이 아니다. 아래 "왜 엄지만 안 맞는가" 를 볼 것.
         """
         if len(self._calib) < 5:
             return False
@@ -676,15 +700,45 @@ class LeapRetargeter:
         해를 건드리지 않는다. 그래서 전체를 다시 풀고 실패한 손가락 블록만 가져와도
         된다(손가락 단위로 따로 푸는 것과 수학적으로 같다).
 
-        재시도는 임계를 넘은 손가락이 남아 있는 동안만 돈다. 텔레오퍼레이션에서는
-        직전 프레임 해가 시드라 대부분 첫 판에 끝나고, 재시도 비용은 거의 안 든다.
-        """
+        재시도는 임계를 넘은 손가락이 남아 있는 동안만 돈다.
+
+언제 재시도하는가 (고정 임계가 아니다)
+        ---------------------------------
+        재시도는 IK 가 **국소최소에 빠졌을 때** 빠져나오라고 있다(실측된 국소최소는
+        잔차 158mm). 그런데 "얼마면 실패인가" 는 상황마다 다르다:
+
+          - 합성 테스트: 목표를 LEAP 자신에게서 만들었으므로 정답 잔차가 0 이다.
+            5mm 면 국소최소다. 반드시 재시도해야 한다.
+          - 실제 손: 사람과 LEAP 기하가 달라 정상적으로 풀려도 잔차가 남는다.
+            실측 녹화 재생에서 평균 5.4mm 다. 이건 재시도해도 안 줄어든다.
+
+        고정 임계 3mm 로는 실제 손에서 매 프레임 전부 재시도가 돌았다. 녹화 재생:
+
+            임계    재시도   손끝잔차   지터    처리시간
+            3mm     5.00    5.39mm   2.40d   34.5ms
+            15mm    0.00    5.39mm   2.37d    5.9ms
+            40mm    0.00    5.41mm   2.32d    5.8ms
+
+        **잔차가 전혀 안 줄었다.** 재시도가 해를 개선한 적이 없다는 뜻이다. 비용만
+        6 배였고 프레임마다 이기는 시드가 갈리며 지터를 키웠다. 그렇다고 임계를
+        20mm 로 올리면 합성 테스트의 진짜 국소최소를 놓친다.
+
+        그래서 손가락별로 최근 잔차의 지수이동평균을 들고, **그보다 restart_ratio 배
+        나쁠 때만** 재시도한다. 절대 하한 restart_threshold 도 같이 둔다. 평소 수준을
+        스스로 배우므로 두 경우 모두 맞는다.
+                """
         q = self._solve_dls(targets, self._q if seed is None else seed)
         residual = self.finger_residual(targets, q)
         self.last_restarts = 0
 
+        def limit(f: str) -> float:
+            ema = self._residual_ema.get(f)
+            if ema is None:
+                return self.restart_threshold
+            return max(self.restart_threshold, self.restart_ratio * ema)
+
         for alt in alt_seeds:
-            failed = [f for f, r in residual.items() if r > self.restart_threshold]
+            failed = [f for f, r in residual.items() if r > limit(f)]
             if not failed:
                 break
             self.last_restarts += 1
@@ -694,6 +748,12 @@ class LeapRetargeter:
                 if residual_alt[f] < residual[f]:
                     q[FINGER_JOINTS[f]] = q_alt[FINGER_JOINTS[f]]
                     residual[f] = residual_alt[f]
+
+        # 평소 수준을 갱신한다. 재시도까지 끝난 뒤의 잔차라 '이 손에서 낼 수 있는
+        # 최선' 에 해당한다.
+        for f, r in residual.items():
+            prev = self._residual_ema.get(f)
+            self._residual_ema[f] = r if prev is None else 0.9 * prev + 0.1 * r
         return q
 
     def _solve_dls(self, targets: np.ndarray, seed: np.ndarray | None = None) -> np.ndarray:

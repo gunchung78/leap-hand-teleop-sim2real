@@ -94,22 +94,16 @@ def main() -> int:
     print("=" * 68)
     rec: dict = {}
 
-    print(f"\n[1/{len(POSES) + 2}] 캘리브레이션 1/2 — 손을 **펴서** 보여 주세요 ({args.hold:.0f}초)")
+    print(f"\n[1/{len(POSES) + 1}] 캘리브레이션 — 손을 **펴서** 보여 주세요 ({args.hold:.0f}초)")
     f_rest = collect(cap, tracker, args.hold, "calib rest", "hold hand OPEN", show)
     rec["calib_rest"] = np.array([o.world for o in f_rest]) if f_rest else np.zeros((0, 21, 3))
     for obs in f_rest:
         rt.observe_calibration(obs.world, phase="rest")
-    print(f"\n[2/{len(POSES) + 2}] 캘리브레이션 2/2 — **엄지를 손바닥에 붙여** 주세요 ({args.hold:.0f}초)")
-    f_fold = collect(cap, tracker, args.hold, "calib fold", "THUMB onto palm", show)
-    rec["calib_fold"] = np.array([o.world for o in f_fold]) if f_fold else np.zeros((0, 21, 3))
-    for obs in f_fold:
-        rt.observe_calibration(obs.world, phase="fold")
     if not rt.finish_calibration():
         print("  표본 부족. 손이 안 잡혔습니다. 조명/거리를 확인하세요.")
         cap.release()
         return 1
-    print(f"  보정각 {np.degrees(rt.thumb_align_angle()):.1f} deg"
-          f"   회전축(roll) 결정됨: {'예' if rt.calib_roll_fixed else '아니오 — 접기 자세 실패'}")
+    print(f"  보정각 {np.degrees(rt.thumb_align_angle()):.1f} deg")
     print(f"  LEAP 엄지 안착방향(손바닥계) {np.round(rt.reference.thumb_rest, 3)}")
     print(f"  LEAP 엄지 도달거리 {rt.reference.reach['thumb'] * 1000:.1f} mm,"
           f" 말단마디 {rt.reference.distal_length['thumb'] * 1000:.1f} mm")
@@ -123,8 +117,8 @@ def main() -> int:
     print("-" * 68)
 
     rows = []
-    for i, (label, hint) in enumerate(POSES, start=3):
-        print(f"\n[{i}/{len(POSES) + 2}] {label} — {hint} ({args.hold:.0f}초)", flush=True)
+    for i, (label, hint) in enumerate(POSES, start=2):
+        print(f"\n[{i}/{len(POSES) + 1}] {label} — {hint} ({args.hold:.0f}초)", flush=True)
         frames = collect(cap, tracker, args.hold, label, hint, show)
         rec[f"pose{i}"] = np.array([o.world for o in frames]) if frames else np.zeros((0, 21, 3))
         if len(frames) < 5:
