@@ -74,6 +74,8 @@ def main() -> int:
     ap.add_argument("--mirror", action="store_true")
     ap.add_argument("--hold", type=float, default=3.0, help="자세당 유지 시간(초)")
     ap.add_argument("--no-window", action="store_true")
+    ap.add_argument("--save", default="thumb_capture.npz",
+                    help="랜드마크를 이 파일에 저장한다. 카메라 없이 재현·검증하는 데 쓴다")
     args = ap.parse_args()
 
     import cv2
@@ -90,11 +92,17 @@ def main() -> int:
     print("=" * 68)
     print("엄지 진단. 안내대로 자세를 잡아 주세요.")
     print("=" * 68)
+    rec: dict = {}
+
     print(f"\n[1/{len(POSES) + 2}] 캘리브레이션 1/2 — 손을 **펴서** 보여 주세요 ({args.hold:.0f}초)")
-    for obs in collect(cap, tracker, args.hold, "calib rest", "hold hand OPEN", show):
+    f_rest = collect(cap, tracker, args.hold, "calib rest", "hold hand OPEN", show)
+    rec["calib_rest"] = np.array([o.world for o in f_rest]) if f_rest else np.zeros((0, 21, 3))
+    for obs in f_rest:
         rt.observe_calibration(obs.world, phase="rest")
     print(f"\n[2/{len(POSES) + 2}] 캘리브레이션 2/2 — **엄지를 손바닥에 붙여** 주세요 ({args.hold:.0f}초)")
-    for obs in collect(cap, tracker, args.hold, "calib fold", "THUMB onto palm", show):
+    f_fold = collect(cap, tracker, args.hold, "calib fold", "THUMB onto palm", show)
+    rec["calib_fold"] = np.array([o.world for o in f_fold]) if f_fold else np.zeros((0, 21, 3))
+    for obs in f_fold:
         rt.observe_calibration(obs.world, phase="fold")
     if not rt.finish_calibration():
         print("  표본 부족. 손이 안 잡혔습니다. 조명/거리를 확인하세요.")
@@ -118,6 +126,7 @@ def main() -> int:
     for i, (label, hint) in enumerate(POSES, start=3):
         print(f"\n[{i}/{len(POSES) + 2}] {label} — {hint} ({args.hold:.0f}초)", flush=True)
         frames = collect(cap, tracker, args.hold, label, hint, show)
+        rec[f"pose{i}"] = np.array([o.world for o in frames]) if frames else np.zeros((0, 21, 3))
         if len(frames) < 5:
             print(f"  검출 {len(frames)}프레임 — 건너뜀")
             continue
@@ -150,6 +159,13 @@ def main() -> int:
     tracker.close()
     if show:
         cv2.destroyAllWindows()
+
+    if args.save:
+        rec["pose_labels"] = np.array([lbl for lbl, _ in POSES])
+        np.savez_compressed(args.save, **rec)
+        n = sum(v.shape[0] for k, v in rec.items() if k != "pose_labels")
+        print(f"\n랜드마크 {n}프레임을 {args.save} 에 저장했습니다.")
+        print("이 파일이 있으면 카메라 없이 같은 데이터로 반복 검증할 수 있습니다.")
 
     print("\n" + "=" * 68)
     print("결과 — 이 블록을 복사해서 주면 됩니다")
