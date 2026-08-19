@@ -212,7 +212,10 @@ def main() -> int:
                 lost_since = None
                 q_prev = q_cmd
                 q_cmd = retargeter.retarget(obs.world, dt=dt)
-                tip_errors.append(float(retargeter.tip_error()[1::2].mean()))
+                tip_errors.append(
+                    float(np.nanmean(retargeter.tip_error()))
+                    if use_dex else float(retargeter.tip_error()[1::2].mean())
+                )
 
                 restarts.append(retargeter.last_restarts)
                 jitter.append(float(np.abs(q_cmd - q_prev).max()))
@@ -254,7 +257,7 @@ def main() -> int:
                 jit = np.degrees(np.mean(jitter[-30:])) if jitter else float("nan")
                 rst = np.mean(restarts[-30:]) if restarts else 0.0
                 # dex 는 벡터를 맞추므로 mm 잔차가 같은 뜻이 아니다. 라벨을 구분한다.
-                cost = (f"목적함수 {np.mean(tip_errors[-30:]):7.5f}" if use_dex
+                cost = (f"벡터오차 {tip:5.2f} mm" if use_dex
                         else f"손끝잔차 {tip:5.2f} mm  재시도 {rst:3.1f}")
                 msg = (f"{fps:5.1f} fps  검출 {detected}/{frames}"
                        f"  {cost}  지터 {jit:5.2f} deg"
@@ -298,9 +301,9 @@ def main() -> int:
     if frames:
         print(f"손 검출률 {detected / frames:.0%}")
     if tip_errors and use_dex:
-        t = np.array(tip_errors)
-        print(f"최적화 목적함수 평균 {t.mean():.5f}, 최대 {t.max():.5f}"
-              f" (벡터 오차의 Huber loss. mm 가 아니다)")
+        t = np.array(tip_errors) * 1000
+        print(f"목표 벡터 오차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm"
+              f" (dexpilot 이면 손끝간 거리 6개 + 손목->손끝 4개)")
     elif tip_errors:
         t = np.array(tip_errors) * 1000
         print(f"IK 손끝 잔차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm (앞마디는 보조 목표라 제외)")
