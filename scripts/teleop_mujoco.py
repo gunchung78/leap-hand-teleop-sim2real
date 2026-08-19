@@ -59,7 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="지수 평활 계수. 1이면 평활 없음, 작을수록 부드럽고 느리다")
     ap.add_argument("--max-speed", type=float, default=8.0, help="관절 속도 상한 (rad/s)")
     ap.add_argument("--distal-mode", default="leap", choices=["leap", "scaled"],
-                    help="손끝 목표의 말단 마디 길이를 LEAP 값으로 쓸지, 사람에서 스케일할지")
+                    help="앞마디 목표를 LEAP 말단 마디 길이로 되짚을지, 사람에서 스케일할지")
+    ap.add_argument("--dip-weight", type=float, default=0.3,
+                    help="앞마디 목표의 가중치. 손끝은 항상 1.0 이다")
+    ap.add_argument("--calib-frames", type=int, default=30,
+                    help="엄지 정렬 캘리브레이션에 쓸 프레임 수 (0=건너뜀)")
 
     ap.add_argument("--real", action="store_true", help="실기도 함께 구동")
     ap.add_argument("--port", default=None)
@@ -96,6 +100,7 @@ def main() -> int:
         distal_mode=args.distal_mode,
         smoothing=args.smoothing,
         max_speed=args.max_speed,
+        dip_weight=args.dip_weight,
     )
 
     model = mujoco.MjModel.from_xml_path(MJCF_SCENE)
@@ -119,6 +124,34 @@ def main() -> int:
         import mujoco.viewer
 
         viewer = mujoco.viewer.launch_passive(model, data)
+
+    if args.calib_frames:
+        print(f"\n[엄지 정렬] 손을 **펴서** 카메라에 보여 주세요. {args.calib_frames} 프레임 모읍니다.")
+        print("  사람 엄지가 손바닥 대비 놓인 방향은 LEAP 과 크게 다르고 사람마다도 다릅니다.")
+        print("  이 자세를 기준으로 삼아야 엄지가 제대로 따라갑니다.")
+        collected = 0
+        t_calib = time.time()
+        while collected < args.calib_frames and time.time() - t_calib < 30:
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            frame = tracker.preprocess(frame)
+            obs = tracker.process(frame)
+            if obs is not None:
+                retargeter.observe_calibration(obs.world)
+                collected += 1
+                if not args.no_window:
+                    ht.draw_landmarks(frame, obs)
+            if not args.no_window:
+                cv2.putText(frame, f"calibrating thumb {collected}/{args.calib_frames}",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+                cv2.imshow("teleop", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+        if retargeter.finish_calibration():
+            print(f"  완료. 보정각 {np.degrees(retargeter.thumb_align_angle()):.1f} deg\n")
+        else:
+            print("  표본이 부족해 건너뜁니다. 엄지 정확도가 떨어집니다.\n")
 
     print("손을 카메라에 보이면 따라간다. q 또는 Ctrl-C 로 종료.")
     print(f"MuJoCo 시나리오: {os.path.relpath(MJCF_SCENE, REPO)}")
@@ -154,7 +187,7 @@ def main() -> int:
                 lost_since = None
                 q_prev = q_cmd
                 q_cmd = retargeter.retarget(obs.world, dt=dt)
-                tip_errors.append(float(retargeter.tip_error().mean()))
+                tip_errors.append(float(retargeter.tip_error()[1::2].mean()))
                 restarts.append(retargeter.last_restarts)
                 jitter.append(float(np.abs(q_cmd - q_prev).max()))
                 if not args.no_window:
@@ -195,7 +228,7 @@ def main() -> int:
                 jit = np.degrees(np.mean(jitter[-30:])) if jitter else float("nan")
                 rst = np.mean(restarts[-30:]) if restarts else 0.0
                 msg = (f"{fps:5.1f} fps  검출 {detected}/{frames}"
-                       f"  IK 잔차 {tip:5.2f} mm  지터 {jit:5.2f} deg  재시도 {rst:3.1f}"
+                       f"  손끝잔차 {tip:5.2f} mm  지터 {jit:5.2f} deg  재시도 {rst:3.1f}"
                        f"  처리 {np.mean(loop_ms[-30:]):4.1f} ms  접촉 {data.ncon:2d}")
                 if over_current:
                     msg += f"  ! 전류 초과 {over_current}"
@@ -237,7 +270,7 @@ def main() -> int:
         print(f"손 검출률 {detected / frames:.0%}")
     if tip_errors:
         t = np.array(tip_errors) * 1000
-        print(f"IK 손끝 잔차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm")
+        print(f"IK 손끝 잔차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm (앞마디는 보조 목표라 제외)")
     if jitter:
         j = np.degrees(np.array(jitter))
         print(f"프레임간 관절각 변화 평균 {j.mean():.2f} deg, 95% {np.percentile(j, 95):.2f} deg,"

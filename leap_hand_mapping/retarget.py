@@ -109,11 +109,12 @@ ROOT_LINKS = {"index": 0, "middle": 5, "ring": 10, "thumb": 15}
 
 # 사람 쪽 대응 뿌리와, 뿌리에서 EE 까지의 마디 사슬.
 # 마디 길이의 합은 손을 굽히든 펴든 변하지 않으므로 "뻗었을 때 길이"로 쓸 수 있다.
+# 뿌리 -> ... -> 손끝. 마디 길이의 합이 "뻗었을 때 길이"다.
 HUMAN_CHAIN = {
-    "index":  (ht.INDEX_MCP, ht.INDEX_PIP, ht.INDEX_DIP),
-    "middle": (ht.MIDDLE_MCP, ht.MIDDLE_PIP, ht.MIDDLE_DIP),
-    "ring":   (ht.RING_MCP, ht.RING_PIP, ht.RING_DIP),
-    "thumb":  (ht.THUMB_CMC, ht.THUMB_MCP, ht.THUMB_IP),
+    "index":  (ht.INDEX_MCP, ht.INDEX_PIP, ht.INDEX_DIP, ht.INDEX_TIP),
+    "middle": (ht.MIDDLE_MCP, ht.MIDDLE_PIP, ht.MIDDLE_DIP, ht.MIDDLE_TIP),
+    "ring":   (ht.RING_MCP, ht.RING_PIP, ht.RING_DIP, ht.RING_TIP),
+    "thumb":  (ht.THUMB_CMC, ht.THUMB_MCP, ht.THUMB_IP, ht.THUMB_TIP),
 }
 
 
@@ -133,6 +134,27 @@ def orthonormal_frame(across: np.ndarray, along: np.ndarray) -> np.ndarray:
     return np.column_stack([x, y, z])
 
 
+def rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """단위벡터 a 를 b 로 보내는 최소 회전 (로드리게스)."""
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+    v = np.cross(a, b)
+    c = float(np.dot(a, b))
+    s = float(np.linalg.norm(v))
+    if s < 1e-9:
+        # 같은 방향이거나 정반대. 정반대면 아무 수직축으로 180도 돌린다.
+        if c > 0:
+            return np.eye(3)
+        axis = np.cross(a, [1.0, 0.0, 0.0])
+        if np.linalg.norm(axis) < 1e-6:
+            axis = np.cross(a, [0.0, 1.0, 0.0])
+        axis = axis / np.linalg.norm(axis)
+        K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+        return np.eye(3) + 2.0 * (K @ K)
+    K = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+    return np.eye(3) + K + K @ K * ((1 - c) / (s * s))
+
+
 @dataclass
 class LeapReference:
     """LEAP 손의 영점 자세 기하. URDF 에서 한 번만 읽는다."""
@@ -142,7 +164,8 @@ class LeapReference:
     palm_width: float               # 검지 MCP <-> 약지 MCP
     distal_length: dict = field(default_factory=dict)   # 손가락별 fingertip -> realtip
     root: dict = field(default_factory=dict)            # 손가락별 뿌리 링크 원점
-    reach: dict = field(default_factory=dict)           # 뿌리 -> EE 직선거리 (영점 자세)
+    reach: dict = field(default_factory=dict)           # 뿌리 -> 손끝 직선거리 (영점 자세)
+    thumb_rest: np.ndarray | None = None                # 손바닥 좌표계에서 본 엄지 안착 방향
 
 
 class LeapRetargeter:
@@ -164,7 +187,8 @@ class LeapRetargeter:
         ik_tolerance: float = 2e-4,
         ik_damping: float = 0.02,
         ik_max_step: float = 0.3,
-        restart_threshold: float = 0.001,
+        restart_threshold: float = 0.003,
+        dip_weight: float = 0.3,
         smoothing: float = 0.4,
         max_speed: float = 8.0,
     ) -> None:
@@ -182,6 +206,14 @@ class LeapRetargeter:
         self.ik_damping = ik_damping
         self.ik_max_step = ik_max_step
         self.restart_threshold = restart_threshold
+        # 목표 8개의 가중치. 손끝이 본 목표이고 앞마디는 자세를 잡아 주는 보조다.
+        #
+        # 앞마디 목표는 손끝에서 LEAP 말단 마디 길이만큼 되짚어 만든 점이라,
+        # 이것까지 1.0 으로 맞추라고 하면 말단 링크의 **방향**까지 사람과 같으라는
+        # 요구가 된다. 손가락에 남은 자유도로는 불가능해서 잔차가 5~26mm 에서
+        # 안 내려가고, 그러면 재시도가 매 프레임 전부 돌아(33ms/프레임) 해가
+        # 프레임마다 갈아타며 손이 떨린다.
+        self.dip_weight = dip_weight
         self.smoothing = smoothing
         self.max_speed = max_speed
 
@@ -231,10 +263,15 @@ class LeapRetargeter:
             )
 
         self.ee_links = [idx for f in FINGERS for idx in EE_LINKS[f]]
+        self.target_weights = np.repeat(
+            np.array([self.dip_weight, 1.0] * len(FINGERS)), 3
+        )
         self.reference = self._measure_reference()
         self._q = np.zeros(jm.NUM_JOINTS)
         self._last_targets: np.ndarray | None = None
         self.last_restarts = 0
+        self.thumb_align = np.eye(3)
+        self._calib: list = []
         self._debug_balls: list[int] = []
         if gui:
             self._create_debug_balls()
@@ -265,16 +302,19 @@ class LeapRetargeter:
         }
         root = {f: self._link_origin(idx) for f, idx in ROOT_LINKS.items()}
         reach = {
-            f: float(np.linalg.norm(self._link_origin(EE_LINKS[f][0]) - root[f]))
+            f: float(np.linalg.norm(self._link_origin(EE_LINKS[f][1]) - root[f]))
             for f in FINGERS
         }
+        rotation = orthonormal_frame(across, along)
+        thumb_rest = rotation.T @ (self._link_origin(EE_LINKS["thumb"][0]) - root["thumb"])
         return LeapReference(
             origin=origin,
-            rotation=orthonormal_frame(across, along),
+            rotation=rotation,
             palm_width=float(np.linalg.norm(across)),
             distal_length=distal,
             root=root,
             reach=reach,
+            thumb_rest=thumb_rest / np.linalg.norm(thumb_rest),
         )
 
     def human_frame(self, world: np.ndarray) -> tuple[np.ndarray, np.ndarray, float]:
@@ -306,21 +346,42 @@ class LeapRetargeter:
         굽혀도 변하지 않으므로 매 프레임 안정적으로 잴 수 있다.
         """
         scales = {}
-        for f, (a, b, c) in HUMAN_CHAIN.items():
-            length = (np.linalg.norm(world[b] - world[a])
-                      + np.linalg.norm(world[c] - world[b]))
+        for f, chain in HUMAN_CHAIN.items():
+            length = sum(
+                float(np.linalg.norm(world[chain[i + 1]] - world[chain[i]]))
+                for i in range(len(chain) - 1)
+            )
             scales[f] = self.reference.reach[f] / max(length, 1e-6)
         return scales
 
     def compute_targets(self, world: np.ndarray) -> np.ndarray:
         """21 랜드마크 -> IK 목표점 8개 (LEAP base 프레임, 미터). 순서는 EE_LINKS 와 같다.
 
-        손가락마다 **자기 뿌리(MCP)를 원점으로** 삼고 자기 길이 배율로 스케일한다.
+        손가락마다 **자기 뿌리를 원점으로** 삼고 자기 길이 배율로 스케일한다.
         손바닥 좌표계는 방향(회전)을 맞추는 데만 쓴다.
 
-        이렇게 하면 목표가 뿌리에서 `배율 x 현재 MCP->DIP 거리` 만큼 떨어지는데,
-        이 값은 정의상 `배율 x 뻗었을 때 길이` = LEAP 도달거리 이하다.
-        즉 **거리 면에서는 항상 도달 가능**하다. 남는 것은 방향이 관절 범위 안이냐뿐.
+        손끝을 앵커로 삼는다
+        -------------------
+        LEAP 은 말단 마디가 도달거리의 83~89% 로 유별나게 길다(검지 74.3/161.1,
+        엄지 71.6/148.5). 사람은 35% 근처다. 이 차이 때문에 손끝과 그 앞 마디를
+        동시에 맞추는 것은 불가능하다. 둘 중 하나를 골라야 한다.
+
+        조작에서 의미가 있는 것은 **손끝(접촉점)** 이다. 그래서 손끝 위치를 먼저
+        맞추고, 그 앞 마디 목표는 LEAP 자신의 말단 마디 길이만큼 되짚어 만든다.
+        방향은 사람에게서 받는다. 두 목표가 LEAP 기하와 항상 정합하므로 IK 가
+        깨끗하게 풀린다.
+
+        사람 비율로 합성한 손에서, 로봇 손끝이 사람 손끝(스케일)에서 벗어난 거리:
+
+            자세      앞마디 앵커      손끝 앵커
+            편 손        2.5mm          2.1mm
+            살짝 굽힘   18.1mm          4.1mm
+            반쯤 굽힘   34.5mm          7.0mm
+            주먹        48.6mm         13.2mm
+
+        목표 손끝은 뿌리에서 `배율 x 현재 뿌리->손끝 거리` 만큼 떨어지는데, 이 값은
+        정의상 `배율 x 뻗었을 때 길이` = LEAP 도달거리 이하다. 즉 **거리 면에서는
+        항상 도달 가능**하다. 남는 것은 방향이 관절 범위 안이냐뿐.
         """
         _, h_rot, _ = self.human_frame(world)
         ref = self.reference
@@ -329,26 +390,68 @@ class LeapRetargeter:
 
         targets = []
         for f in FINGERS:
-            i_root = HUMAN_CHAIN[f][0]
-            i_dip, i_tip = EE_LANDMARKS[f]
+            chain = HUMAN_CHAIN[f]
+            i_root, i_dip, i_tip = chain[0], chain[-2], chain[-1]
             s_f = scales[f] * gain
 
-            # 뿌리에서 본 상대 위치만 옮긴다. 손바닥 폭은 관여하지 않는다.
-            a = ref.root[f] + ref.rotation @ (s_f * (h_rot.T @ (world[i_dip] - world[i_root])))
+            # 엄지는 사람과 LEAP 의 안착 방향이 달라 정렬 회전을 한 번 더 건다.
+            align = self.thumb_align if f == "thumb" else None
 
-            d = h_rot.T @ (world[i_tip] - world[i_dip])
+            def to_palm(v):
+                local = h_rot.T @ v
+                return align @ local if align is not None else local
+
+            tip = ref.root[f] + ref.rotation @ (s_f * to_palm(world[i_tip] - world[i_root]))
+
+            d = to_palm(world[i_tip] - world[i_dip])
             n = np.linalg.norm(d)
-            if n > 1e-6:
-                if self.distal_mode == "leap":
-                    # 방향만 사람에게서 받고 길이는 LEAP 자신의 말단 마디 값을 쓴다.
-                    b = a + ref.distal_length[f] * (ref.rotation @ (d / n))
-                else:
-                    b = a + ref.rotation @ (s_f * d)
+            if n < 1e-6:
+                dip = tip
+            elif self.distal_mode == "leap":
+                # 손끝에서 LEAP 자신의 말단 마디 길이만큼 되짚는다. 방향만 사람 것.
+                dip = tip - ref.distal_length[f] * (ref.rotation @ (d / n))
             else:
-                b = a
-            targets.append(a)
-            targets.append(b)
+                dip = tip - ref.rotation @ (s_f * d)
+            targets.append(dip)
+            targets.append(tip)
         return np.array(targets)
+
+    def observe_calibration(self, world: np.ndarray) -> None:
+        """엄지 정렬용 표본을 모은다. 손을 편 상태로 몇 프레임 넣어 준다."""
+        _, h_rot, _ = self.human_frame(world)
+        d = h_rot.T @ (world[ht.THUMB_IP] - world[ht.THUMB_CMC])
+        n = np.linalg.norm(d)
+        if n > 1e-6:
+            self._calib.append(d / n)
+
+    def finish_calibration(self) -> bool:
+        """모은 표본으로 엄지 정렬 회전을 확정한다.
+
+        왜 필요한가
+        ----------
+        사람 엄지가 손바닥 대비 놓인 방향과 LEAP 엄지 뿌리(pip_4)가 향한 방향은
+        서로 다르다. 손바닥 좌표계 회전을 그대로 엄지에 적용하면 LEAP 이 낼 수
+        없는 방향을 목표로 주게 되고, th_cmc 가 상한(2.094)에 붙은 채 손끝 잔차가
+        40mm 대에서 안 내려간다. 목표 가중치를 조정해도(엄지 TIP 만 써도) 그대로다
+        — 거리 문제가 아니라 **방향이 작업공간 밖**이기 때문이다.
+
+        사람마다 엄지 안착 각도가 다르므로 상수로 박을 수 없다. 손을 편 자세를
+        몇 프레임 보고, 그때의 엄지 방향을 LEAP 의 안착 방향으로 보내는 최소
+        회전을 구해 둔다. 이후 엄지 움직임은 그 기준에서의 편차로 전달된다.
+        """
+        if len(self._calib) < 5:
+            return False
+        mean = np.mean(self._calib, axis=0)
+        if np.linalg.norm(mean) < 1e-6:
+            return False
+        self.thumb_align = rotation_between(mean, self.reference.thumb_rest)
+        self._calib = []
+        return True
+
+    def thumb_align_angle(self) -> float:
+        """엄지 정렬 회전의 크기(rad). 캘리브레이션이 얼마나 보정했는지 보는 값."""
+        c = (np.trace(self.thumb_align) - 1.0) / 2.0
+        return float(np.arccos(np.clip(c, -1.0, 1.0)))
 
     def seed_from_human(self, world: np.ndarray) -> np.ndarray:
         """사람 손의 관절각을 그대로 재서 IK 시드로 쓴다.
@@ -415,10 +518,19 @@ class LeapRetargeter:
         ])
 
     def finger_residual(self, targets: np.ndarray, q: np.ndarray) -> dict:
-        """자세 q 에서 손가락별 최대 손끝 잔차(m)."""
+        """자세 q 에서 손가락별 잔차(m). 앞마디는 가중치를 곱해 센다.
+
+        앞마디를 1.0 으로 세면 도달 불가능한 잔차(5~26mm) 때문에 재시도가 매
+        프레임 전부 돌고, 그 결과 해가 프레임마다 갈아타며 손이 떨린다.
+        아예 빼 버리면 손끝만 맞고 앞마디가 엉뚱한 국소최소를 못 걸러 낸다.
+        가중치를 곱해 세는 것이 그 사이다.
+        """
         self._set_joints(q)
         err = np.linalg.norm(self._ee_positions() - targets, axis=1)
-        return {f: float(err[2 * i:2 * i + 2].max()) for i, f in enumerate(FINGERS)}
+        return {
+            f: float(max(err[2 * i] * self.dip_weight, err[2 * i + 1]))
+            for i, f in enumerate(FINGERS)
+        }
 
     def restart_seeds(self, world: np.ndarray | None = None) -> list:
         """국소최소에서 빠져나올 재시도 시드들. 앞쪽일수록 먼저 쓴다.
@@ -495,12 +607,13 @@ class LeapRetargeter:
         hi = jm.LIMITS_INTERSECTION_MJ_UPPER
         eye = np.eye(jm.NUM_JOINTS)
 
+        w = self.target_weights
         for _ in range(self.ik_iterations):
             self._set_joints(q)
-            error = (targets - self._ee_positions()).ravel()
+            error = (targets - self._ee_positions()).ravel() * w
             if np.abs(error).max() < self.ik_tolerance:
                 break
-            J = self._jacobian(q)
+            J = self._jacobian(q) * w[:, None]
             dq = np.linalg.solve(J.T @ J + (self.ik_damping ** 2) * eye, J.T @ error)
             dq = np.clip(dq, -self.ik_max_step, self.ik_max_step)
             new_q = np.clip(q + dq, lo, hi)

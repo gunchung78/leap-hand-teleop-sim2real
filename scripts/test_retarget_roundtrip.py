@@ -98,8 +98,12 @@ def fake_human_landmarks(rt: LeapRetargeter, q: np.ndarray, rng) -> np.ndarray:
 
     # 중간 관절은 손바닥 쪽으로 굽힌다. 사람 손이 그렇게 굽는다.
     bend = -rt.reference.rotation[:, 2]
+    # 가짜 사람 손의 뿌리->손끝 사슬 길이가 LEAP 도달거리와 같아야 배율이 닫힌다.
+    # 말단 마디(DIP->TIP)는 강체라 이미 고정이므로 나머지를 중간 관절로 채운다.
     mid = {
-        f: middle_joint(root[f], dip[f], rt.reference.reach[f], bend) for f in FINGERS
+        f: middle_joint(root[f], dip[f],
+                        rt.reference.reach[f] - rt.reference.distal_length[f], bend)
+        for f in FINGERS
     }
 
     # 손목은 랜드마크 배치를 채우기 위한 점이다. 리타겟터는 이 점을 손가락 방향
@@ -171,11 +175,15 @@ def main() -> int:
 
     joint_err = np.degrees(np.array(joint_err))
     tip_err = np.array(tip_err) * 1000.0
+    # 목표 8개 중 홀수 번째가 손끝, 짝수 번째가 앞마디다.
+    dip_err = tip_err[:, 0::2]
+    tip_only = tip_err[:, 1::2]
 
     print(f"시행 {args.trials}회, 자세 진폭 {args.amplitude}")
     print()
     print(f"관절각 오차   평균 {joint_err.mean():6.2f} deg   최대 {joint_err.max():6.2f} deg")
-    print(f"손끝 잔차     평균 {tip_err.mean():6.2f} mm    최대 {tip_err.max():6.2f} mm")
+    print(f"손끝 잔차     평균 {tip_only.mean():6.2f} mm    최대 {tip_only.max():6.2f} mm   <- 판정 기준")
+    print(f"앞마디 잔차   평균 {dip_err.mean():6.2f} mm    최대 {dip_err.max():6.2f} mm   (보조 목표)")
     print()
     print(f"{'관절':>3} {'이름':<8} {'평균(deg)':>10} {'최대(deg)':>10}")
     for i in range(jm.NUM_JOINTS):
@@ -184,8 +192,9 @@ def main() -> int:
 
     rt.close()
 
-    # 손끝 잔차는 IK 가 목표에 얼마나 붙었는지다. 좌표계가 틀리면 여기서부터 커진다.
-    ok = tip_err.mean() < 3.0
+    # 손끝이 본 목표다. 앞마디는 가중치를 낮춘 보조 목표라 판정에서 뺀다.
+    # (자세를 잡아 주는 역할이라 남는 잔차는 정상이다. retarget.py 의 dip_weight 참조)
+    ok = tip_only.mean() < 1.0
     print()
     print("판정:", "통과 — 좌표 변환과 IK 가 일관적이다" if ok
           else "실패 — 손끝 잔차가 크다. 좌표계 구성을 의심할 것")
