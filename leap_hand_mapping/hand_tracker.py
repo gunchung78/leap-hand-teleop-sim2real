@@ -32,7 +32,7 @@ mediapipe 1.x 는 legacy `mp.solutions.hands` 를 없앴고 tasks API 만 남았
 tasks API 는 모델을 패키지에 넣어 두지 않으므로 hand_landmarker.task 를
 따로 받아야 한다(약 7.5MB).
 
-    bash scripts/fetch_mediapipe_model.sh
+    bash scripts/phase1/p1_0_fetch_mediapipe_model.sh
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ class HandTracker:
         if not os.path.exists(model_path):
             raise FileNotFoundError(
                 f"MediaPipe 모델이 없다: {model_path}\n"
-                f"  bash scripts/fetch_mediapipe_model.sh   (또는 {MODEL_URL} 를 직접 받을 것)"
+                f"  bash scripts/phase1/p1_0_fetch_mediapipe_model.sh   (또는 {MODEL_URL} 를 직접 받을 것)"
             )
 
         from mediapipe.tasks import python as mp_python

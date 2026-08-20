@@ -16,8 +16,8 @@
   - 매핑이 틀리면: 자세에 따라 오차가 크게 요동친다.
 
 사용법:
-    python scripts/verify_mapping_fk.py            # 전체 검증
-    python scripts/verify_mapping_fk.py --samples 500
+    python scripts/phase0/p0_1_verify_mapping_fk.py            # 전체 검증
+    python scripts/phase0/p0_1_verify_mapping_fk.py --samples 500
 """
 
 from __future__ import annotations
@@ -29,11 +29,11 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from leap_hand_mapping import joint_map as jm  # noqa: E402
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MJCF = os.path.join(REPO, "third_party/mujoco_menagerie/leap_hand/right_hand.xml")
 URDF = os.path.join(
     REPO, "third_party/Bidex_VisionPro_Teleop/leap_hand_mesh_right/robot_pybullet.urdf"

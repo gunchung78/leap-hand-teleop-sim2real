@@ -9,7 +9,7 @@
 
 를 출력한다. 결과를 그대로 복사해 붙이면 원인을 가릴 수 있다.
 
-    python scripts/diag_thumb.py
+    python scripts/phase1/p1_diag_thumb.py
 
 화면 없이 돌리려면 --no-window. 자세마다 3초씩 준다(--hold 로 변경).
 """
@@ -23,7 +23,7 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 from leap_hand_mapping import joint_map as jm  # noqa: E402

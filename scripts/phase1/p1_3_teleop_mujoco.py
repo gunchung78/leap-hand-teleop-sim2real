@@ -8,10 +8,10 @@
 
 사용법
 ------
-    python scripts/check_hand_tracking.py     # 먼저 추적부터 확인
-    python scripts/teleop_mujoco.py           # 시뮬만
-    python scripts/teleop_mujoco.py --pybullet-gui   # IK 목표점까지 같이 본다
-    python scripts/teleop_mujoco.py --real           # 실기까지
+    python scripts/phase1/p1_1_check_hand_tracking.py     # 먼저 추적부터 확인
+    python scripts/phase1/p1_3_teleop_mujoco.py           # 시뮬만
+    python scripts/phase1/p1_3_teleop_mujoco.py --pybullet-gui   # IK 목표점까지 같이 본다
+    python scripts/phase1/p1_3_teleop_mujoco.py --real           # 실기까지
 
 손이 안 잡히면 로봇은 **직전 자세를 유지**한다. 영점으로 튀지 않는다.
 사람이 프레임 밖으로 나갈 때마다 손이 확 펴지면 물건을 놓치기 때문이다.
@@ -34,14 +34,14 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 from leap_hand_mapping import joint_map as jm  # noqa: E402
 from leap_hand_mapping.retarget import LeapRetargeter  # noqa: E402
 from leap_hand_mapping.retarget_dex import DexRetargeter  # noqa: E402
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MJCF_SCENE = os.path.join(REPO, "third_party/mujoco_menagerie/leap_hand/scene_right.xml")
 
 
@@ -54,8 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--mirror", action="store_true",
                     help="영상 좌우 반전. 오른손이 Right 로 안 잡히면 켤 것")
 
-    ap.add_argument("--retargeter", default="dex", choices=["dex", "ours"],
-                    help="dex-retargeting(기본) 또는 직접 구현한 위치 IK(비교용)")
+    ap.add_argument("--retargeter", default="ours", choices=["ours", "dex"],
+                    help="직접 구현한 손끝 위치 IK(기본) 또는 dex-retargeting(비교용)")
     ap.add_argument("--dex-type", default="dexpilot", choices=["dexpilot", "vector"],
                     help="dexpilot 은 손끝끼리의 거리까지 목표에 넣는다 (집기에 유리)")
     ap.add_argument("--dex-scale", type=float, default=None,

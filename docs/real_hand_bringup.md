@@ -89,7 +89,7 @@ sudo udevadm control --reload-rules && sudo udevadm trigger
 ```bash
 conda activate leap-hand
 cd ~/Project/leap-hand-teleop-sim2real
-python scripts/preflight_real_hand.py
+python scripts/phase0/p0_2_preflight_real_hand.py
 ```
 
 토크를 켜지 않고 연결만 해서 확인한다.
@@ -114,10 +114,10 @@ python scripts/preflight_real_hand.py
 
 ```bash
 # 먼저 시뮬만 돌려서 무엇이 움직일지 눈으로 익힌다
-python scripts/sweep_joints.py --joints 0
+python scripts/phase0/p0_3_sweep_joints.py --joints 0
 
 # 실기. MuJoCo 0번 = if_mcp = 실기 모터 ID 1 (검지 굽힘)
-python scripts/sweep_joints.py --real --joints 0
+python scripts/phase0/p0_3_sweep_joints.py --real --joints 0
 ```
 
 검지가 굽혔다 폈다 하면 성공이다. **다른 손가락이 움직이면 매핑이 틀린 것**이니
@@ -126,7 +126,7 @@ python scripts/sweep_joints.py --real --joints 0
 다음으로 짝을 이루는 관절을 확인한다. 이 둘이 바로 매핑의 핵심이다.
 
 ```bash
-python scripts/sweep_joints.py --real --joints 1   # if_rot = 모터 0 (검지 벌림)
+python scripts/phase0/p0_3_sweep_joints.py --real --joints 1   # if_rot = 모터 0 (검지 벌림)
 ```
 
 0번은 **굽힘**, 1번은 **벌림**이어야 한다. 반대로 나오면 매핑이 뒤집힌 것이다.
@@ -134,7 +134,7 @@ python scripts/sweep_joints.py --real --joints 1   # if_rot = 모터 0 (검지 �
 엄지는 범위가 좁고 간섭이 잦으니 따로 본다.
 
 ```bash
-python scripts/sweep_joints.py --real --joints 12 13 14 15
+python scripts/phase0/p0_3_sweep_joints.py --real --joints 12 13 14 15
 ```
 
 `th_axl`(13번)은 축방향 회전이라 손끝이 거의 안 움직인다. 정상이다.
@@ -144,7 +144,7 @@ python scripts/sweep_joints.py --real --joints 12 13 14 15
 ## 5단계 — 전체 순차 구동
 
 ```bash
-python scripts/sweep_joints.py --real
+python scripts/phase0/p0_3_sweep_joints.py --real
 ```
 
 16개 관절을 하나씩 왕복시키고, 끝나면 관절별 **추종 오차(deg)** 를 집계한다.
@@ -153,7 +153,7 @@ python scripts/sweep_joints.py --real
 진동하거나 과부하가 잦으면 게인을 낮춘다 (문서 4.2).
 
 ```bash
-python scripts/sweep_joints.py --real --kp 400
+python scripts/phase0/p0_3_sweep_joints.py --real --kp 400
 ```
 
 ---

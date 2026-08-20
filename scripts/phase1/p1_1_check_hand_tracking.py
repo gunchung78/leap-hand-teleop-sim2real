@@ -1,9 +1,9 @@
 """웹캠 손 추적만 따로 확인한다. 로봇은 쓰지 않는다.
 
 텔레오퍼레이션이 안 될 때 원인이 추적인지 리타겟팅인지 가르는 데 쓴다.
-먼저 이걸 통과시키고 teleop_mujoco.py 로 갈 것.
+먼저 이걸 통과시키고 p1_3_teleop_mujoco.py 로 갈 것.
 
-    python scripts/check_hand_tracking.py
+    python scripts/phase1/p1_1_check_hand_tracking.py
 
 확인할 것
 --------
@@ -28,7 +28,7 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 
