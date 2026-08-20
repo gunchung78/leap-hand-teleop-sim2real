@@ -54,8 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--mirror", action="store_true",
                     help="영상 좌우 반전. 오른손이 Right 로 안 잡히면 켤 것")
 
-    ap.add_argument("--retargeter", default="ours", choices=["ours", "dex"],
-                    help="직접 구현한 위치 IK(기본) 또는 dex-retargeting")
+    ap.add_argument("--retargeter", default="dex", choices=["dex", "ours"],
+                    help="dex-retargeting(기본) 또는 직접 구현한 위치 IK(비교용)")
     ap.add_argument("--dex-type", default="dexpilot", choices=["dexpilot", "vector"],
                     help="dexpilot 은 손끝끼리의 거리까지 목표에 넣는다 (집기에 유리)")
     ap.add_argument("--dex-scale", type=float, default=None,

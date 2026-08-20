@@ -195,9 +195,56 @@ Phase 1 의 리타겟팅은 처음에 공식 `Bidex_VisionPro_Teleop/avp_leap.py
 사람 35% : LEAP 83~89%) 절대 위치 목표는 자주 도달 불가능해진다. 벡터 집합의
 최소자승 해는 언제나 존재하므로 그 실패 모드가 구조적으로 생기지 않는다.
 
-다만 **실제로 조작해 보고는 직접 구현한 쪽(`ours`)을 기본으로 되돌렸다.** 지표상
-목표 추종은 dex 가 나쁘지 않은데 손이 따라오는 느낌이 달랐다. dex 는 `--retargeter
-dex` 로 남아 있고, 비교 대상이자 대안으로 유지한다.
+#### 어느 쪽을 기본으로 쓸 것인가 — 실측으로 정했다
+
+한때 조작 느낌만 보고 `ours` 를 기본으로 되돌린 적이 있다. 그 판단이 틀린 것은
+아니었다 — `ours` 는 네 손가락 손끝 잔차가 0.5mm 라 추종감이 딱 붙는다. 다만
+**집을 수 있느냐**는 재지 않은 판단이었다.
+
+같은 녹화 데이터로 다시 쟀다(`python scripts/compare_retargeters.py`, 재현 가능):
+
+```
+엄지-검지 손끝 간격 (mm, 평균 / 그 자세의 최소)
+자세                     사람             ours              dex
+편 손              73.2 /  71.8    250.2 / 246.9    141.1 / 136.3
+엄지만 붙임         63.1 /  50.4    230.5 / 208.0    129.5 / 120.5
+검지-엄지 핀치      59.5 /  21.5    146.2 / 124.0     97.1 /  29.8
+주먹               29.0 /  12.6    113.9 /  85.3     31.3 /  29.9
+
+ours  6.5 ms/frame        dex  3.7 ms/frame
+```
+
+`ours` 는 사람이 손끝을 붙여도 85mm 에서 막히고, dex 는 30mm 까지 내려간다.
+그 30mm 는 알고리즘의 바닥이 아니라 DexPilot 의 `project_dist = 0.03` 임계값이다 —
+사람 손끝 간격이 3cm 아래로 내려가면 목표가 "붙여라"로 바뀌고, 그 안에서 접촉까지
+간다. **dex 는 핀치가 되고 `ours` 는 안 된다.** 게다가 dex 가 더 빠르다.
+
+원인이 카메라가 아니라는 것도 같은 스크립트가 보여 준다. 사람 엄지 끝 랜드마크를
+검지 끝에 **정확히 겹쳐 놓고**(= 무한히 좋은 3D 센서) 목표를 다시 계산하면:
+
+```
+편 손 231.4 mm / 엄지만 붙임 230.4 / 핀치 186.9 / 주먹 82.1
+```
+
+센서가 완벽해도 `ours` 는 로봇에게 "손끝을 187mm 벌려라"라고 시킨다. 손가락마다
+자기 뿌리를 원점으로 자기 배율(검지 1.91, 엄지 1.57)로 스케일하는데, 손끝 사이
+거리는 그 두 벡터의 **차**라서 배율이 3.5~4.0배로 증폭된다. 손가락끼리를 묶는 항이
+목표에 아예 없다. 로봇 탓도 아니다 — LEAP 자체는 엄지-검지 최소 0.3mm 까지 닿는다.
+
+그래서 **기본을 `--retargeter dex` 로 되돌렸다.** `ours` 는 지우지 않고
+`--retargeter ours` 로 남긴다. 위 표의 근거이자, 왜 손끝 사이 거리를 목표에 넣어야
+하는지를 보여 주는 대조군이다.
+
+이 결정에는 재현성 기준도 걸려 있다. `ours` 는 사람마다 매번 엄지 정렬
+캘리브레이션이 필요하고 roll 자유도가 미결정이라 같은 사람이 두 번 해도 결과가
+갈린다. dex 는 그 단계가 아예 없다.
+
+| | `ours` | `dex` |
+|---|---|---|
+| 설치 | 이 저장소 코드 | `pip install dex_retargeting` |
+| LEAP 설정 | 없음 (URDF 실측) | 저자 배포 `leap_hand_right_dexpilot.yml` |
+| 캘리브레이션 | 필요 (사람마다, 매번) | 없음 |
+| 핀치 | 안 됨 | 됨 |
 
 ```bash
 git clone --depth 1 https://github.com/dexsuite/dex-urdf.git third_party/dex-urdf
@@ -206,7 +253,7 @@ pip install dex-retargeting torch --index-url https://download.pytorch.org/whl/c
 
 ---
 
-## 직접 구현한 리타겟팅 (`--retargeter ours`, 기본)
+## 직접 구현한 리타겟팅 (`--retargeter ours`, 대조군)
 
 손끝 절대 위치를 목표로 IK 를 푼다.
 
@@ -397,7 +444,8 @@ scripts/
   preflight_real_hand.py     실기 사전 점검 (토크를 켜지 않는다)
   sweep_joints.py            관절 순차 구동 (시뮬 / 실기)
   check_hand_tracking.py     웹캠 추적만 확인 (로봇 없이)
-  diag_thumb.py              엄지 리타겟팅 진단 (자세별 목표/잔차/한계관절)
+  diag_thumb.py              엄지 리타겟팅 진단 (--retargeter ours 전용)
+  compare_retargeters.py     ours vs dex 를 녹화 데이터로 같은 자로 비교
   teleop_mujoco.py           텔레오퍼레이션 본체
   test_retarget_roundtrip.py 리타겟팅 기하 검증 (카메라 없이)
   fetch_mediapipe_model.sh   MediaPipe 모델 내려받기
