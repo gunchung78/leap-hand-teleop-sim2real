@@ -121,18 +121,25 @@ python scripts/teleop_mujoco.py
 
 창이 둘 뜬다. 카메라 창과 MuJoCo 뷰어.
 
-기본 리타겟터는 **직접 구현한 위치 IK**(`--retargeter ours`)다. 실제로 조작해 보고
-고른 것이다. dex-retargeting 도 붙어 있고 `--retargeter dex` 로 쓸 수 있는데, 지표상
-목표 추종은 비슷해도 손이 따라오는 느낌은 이쪽이 나았다.
+기본 리타겟터는 **dex-retargeting**(`--retargeter dex`)다. **캘리브레이션이 없다** —
+손목 프레임을 매 프레임 랜드마크에서 추정하므로 사람마다 맞출 것이 없다. 바로 본
+루프가 시작된다. `q`(카메라 창 포커스) 또는 Ctrl-C 로 종료.
 
-시작하면 **엄지 정렬 캘리브레이션이 돈다.** 손을 **펴서** 카메라에 보여 주면
-30프레임을 모으고 보정각을 출력한다. 끝나면 본 루프가 시작된다. `q`(카메라 창 포커스) 또는 Ctrl-C 로 종료.
+배율은 upstream 기본값 1.6 을 건드리지 않는다 — LEAP 팀의 `avp_leap.py` 와 dex 의
+LEAP 설정이 독립적으로 같은 값에 도달했다. `scripts/tune_dex_scale.py` 의 "벡터오차"는
+목표를 얼마나 정확히 따라갔는지일 뿐 **조작감이 아니다.** 1.0 이 오차는 낮았지만 손은
+1.6 이 나았다.
 
-`--retargeter dex` 로 비교해 볼 때는 캘리브레이션이 없다(손목 프레임을 매 프레임
-추정한다). 배율은 upstream 기본값 1.6 을 건드리지 않는다 — LEAP 팀의 `avp_leap.py`
-와 dex 의 LEAP 설정이 독립적으로 같은 값에 도달했다. `scripts/tune_dex_scale.py` 의
-"벡터오차"는 목표를 얼마나 정확히 따라갔는지일 뿐 **조작감이 아니다.** 1.0 이 오차는
-낮았지만 손은 1.6 이 나았다.
+직접 구현한 위치 IK 도 `--retargeter ours` 로 남아 있다. 네 손가락 추종감은 이쪽이
+더 붙지만 **엄지-검지 핀치가 안 된다**(손끝 간격이 85mm 에서 막힌다). 근거와 재현
+방법은 README 의 "어느 쪽을 기본으로 쓸 것인가" 절, 그리고:
+
+```bash
+python scripts/compare_retargeters.py
+```
+
+`ours` 를 쓸 때만 시작 시 **엄지 정렬 캘리브레이션이 돈다.** 손을 **펴서** 카메라에
+보여 주면 30프레임을 모으고 보정각을 출력한다.
 
 ### 확인할 것
 
@@ -176,9 +183,9 @@ python scripts/teleop_mujoco.py
 
 ### 엄지가 이상할 때
 
-기본 리타겟터(`ours`)의 엄지 진단이다. `--retargeter dex` 로 돌리는 중이라면 해당
-없다 — 그쪽은 손목 프레임을 매 프레임 추정하고 벡터를 맞추므로 엄지 캘리브레이션
-자체가 없다.
+`--retargeter ours` 전용 진단이다. 기본값인 `dex` 로 돌리는 중이라면 해당 없다 —
+그쪽은 손목 프레임을 매 프레임 추정하고 벡터를 맞추므로 엄지 캘리브레이션 자체가
+없다.
 
 ```bash
 python scripts/diag_thumb.py
@@ -233,7 +240,7 @@ PyBullet 창이 하나 더 뜨고, IK 가 쫓고 있는 **목표점 8개**가 �
 | 손가락이 늘 뻗어 있음 (dex) | 배율 포화. `python scripts/tune_dex_scale.py` 로 다시 잰다 |
 | 떨림 (dex) | `--dex-alpha 0.1` (기본 0.2, 작을수록 부드럽고 느리다) |
 | 집기가 부정확 (dex) | `--dex-type dexpilot` 인지 확인. `vector` 는 손끝간 거리를 안 본다 |
-| 엄지-검지 핀치가 안 맞음 | 구조적 한계다. `--retargeter dex` 를 쓸 것. README 참고 |
+| 엄지-검지 핀치가 안 맞음 (ours) | `ours` 의 구조적 한계다. 기본값 `dex` 를 쓸 것 |
 | 엄지만 엉뚱함 (ours) | `python scripts/diag_thumb.py` 로 원인을 가른다 |
 | 떨리는데 재시도가 0 (ours) | `--smoothing 0.2` |
 | 재시도가 매 프레임 5.0 (ours) | 이제 적응형이라 정상 상태에서는 0 근처다. 5.0 이면 진짜 국소최소 |
