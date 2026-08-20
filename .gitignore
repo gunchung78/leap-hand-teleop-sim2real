@@ -17,5 +17,5 @@ outputs/
 logs/
 checkpoints/
 
-# MediaPipe 모델 (7.5MB). scripts/fetch_mediapipe_model.sh 로 받는다.
+# MediaPipe 모델 (7.5MB). scripts/phase1/p1_0_fetch_mediapipe_model.sh 로 받는다.
 models/

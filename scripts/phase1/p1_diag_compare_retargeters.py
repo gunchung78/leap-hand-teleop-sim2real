@@ -21,8 +21,8 @@
 
 쓰는 법
 ------
-    python scripts/diag_thumb.py --save thumb_capture.npz     # 먼저 녹화
-    python scripts/compare_retargeters.py
+    python scripts/phase1/p1_diag_thumb.py --save thumb_capture.npz     # 먼저 녹화
+    python scripts/phase1/p1_diag_compare_retargeters.py
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import time
 
 import numpy as np
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, REPO)
 
 from leap_hand_mapping import hand_tracker as ht          # noqa: E402
@@ -57,12 +57,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--capture", default=os.path.join(REPO, "thumb_capture.npz"),
-                    help="diag_thumb.py --save 로 만든 녹화 파일")
+                    help="p1_diag_thumb.py --save 로 만든 녹화 파일")
     args = ap.parse_args()
 
     if not os.path.exists(args.capture):
         print(f"녹화 파일이 없다: {args.capture}\n"
-              f"  python scripts/diag_thumb.py --save {args.capture}")
+              f"  python scripts/phase1/p1_diag_thumb.py --save {args.capture}")
         return 1
 
     d = np.load(args.capture, allow_pickle=True)

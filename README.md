@@ -58,7 +58,7 @@ MuJoCo와 같은 자세를 준 뒤 손끝 기하를 비교한다.
 매핑이 맞으면 자세를 바꿔도 오차가 요동치지 않으므로, 판정 지표는 평균이 아니라 **표준편차**다.
 
 ```bash
-python scripts/verify_mapping_fk.py
+python scripts/phase0/p0_1_verify_mapping_fk.py
 ```
 
 무작위 자세 200개에 대한 결과:
@@ -103,10 +103,10 @@ python scripts/verify_mapping_fk.py
 > 전원·권한·지연시간 설정부터 관절 하나씩 확인하는 절차까지 포함한다.
 
 ```bash
-python scripts/preflight_real_hand.py          # 먼저 이것부터. 모터를 움직이지 않는다
-python scripts/sweep_joints.py                 # 시뮬만 (실기 없이 확인)
-python scripts/sweep_joints.py --real --joints 0   # 관절 하나부터
-python scripts/sweep_joints.py --real          # 전체
+python scripts/phase0/p0_2_preflight_real_hand.py          # 먼저 이것부터. 모터를 움직이지 않는다
+python scripts/phase0/p0_3_sweep_joints.py                 # 시뮬만 (실기 없이 확인)
+python scripts/phase0/p0_3_sweep_joints.py --real --joints 0   # 관절 하나부터
+python scripts/phase0/p0_3_sweep_joints.py --real          # 전체
 ```
 
 관절을 하나씩 왕복시키며 MuJoCo 뷰어와 실기를 나란히 보여 주고,
@@ -163,20 +163,20 @@ python scripts/sweep_joints.py --real          # 전체
 > 촬영 환경, 단계별 확인 항목, 출력 숫자 읽는 법, 튜닝, 문제 해결까지 포함한다.
 
 ```bash
-bash scripts/fetch_mediapipe_model.sh          # 최초 1회 (7.5MB, 저장소에 없음)
-python scripts/check_hand_tracking.py          # 추적만 먼저 확인
-python scripts/teleop_mujoco.py                # 시뮬만
-python scripts/teleop_mujoco.py --pybullet-gui # IK 목표점까지 보면서
-python scripts/teleop_mujoco.py --real         # 실기까지
+bash scripts/phase1/p1_0_fetch_mediapipe_model.sh          # 최초 1회 (7.5MB, 저장소에 없음)
+python scripts/phase1/p1_1_check_hand_tracking.py          # 추적만 먼저 확인
+python scripts/phase1/p1_3_teleop_mujoco.py                # 시뮬만
+python scripts/phase1/p1_3_teleop_mujoco.py --pybullet-gui # IK 목표점까지 보면서
+python scripts/phase1/p1_3_teleop_mujoco.py --real         # 실기까지
 ```
 
-### 리타겟팅 — dex-retargeting 으로 교체
+### 리타겟팅 — 두 방식을 실측으로 비교했다
 
 Phase 1 의 리타겟팅은 처음에 공식 `Bidex_VisionPro_Teleop/avp_leap.py` 방식(손끝
 **절대 위치**를 목표로 PyBullet IK)을 따라 직접 구현했다. 아래 "직접 구현" 절에
 그 과정과 거기서 부딪힌 문제들을 기록해 두었다.
 
-결론부터 말하면 이 문제는 이미 잘 풀려 있었다. **[dex-retargeting](https://github.com/dexsuite/dex-retargeting)**
+리타겟팅 자체는 이미 잘 풀려 있는 문제다. **[dex-retargeting](https://github.com/dexsuite/dex-retargeting)**
 (AnyTeleop, RSS 2023 / MIT)은 LEAP Hand 설정과 MediaPipe 예제를 이미 갖고 있고,
 로봇 모델은 `dex-urdf` 에서 온다 — Phase 0 에서 MuJoCo menagerie 모델의 출처로
 확인했던 바로 그 저장소다.
@@ -201,7 +201,7 @@ Phase 1 의 리타겟팅은 처음에 공식 `Bidex_VisionPro_Teleop/avp_leap.py
 아니었다 — `ours` 는 네 손가락 손끝 잔차가 0.5mm 라 추종감이 딱 붙는다. 다만
 **집을 수 있느냐**는 재지 않은 판단이었다.
 
-같은 녹화 데이터로 다시 쟀다(`python scripts/compare_retargeters.py`, 재현 가능):
+같은 녹화 데이터로 다시 쟀다(`python scripts/phase1/p1_diag_compare_retargeters.py`, 재현 가능):
 
 ```
 엄지-검지 손끝 간격 (mm, 평균 / 그 자세의 최소)
@@ -231,20 +231,60 @@ ours  6.5 ms/frame        dex  3.7 ms/frame
 거리는 그 두 벡터의 **차**라서 배율이 3.5~4.0배로 증폭된다. 손가락끼리를 묶는 항이
 목표에 아예 없다. 로봇 탓도 아니다 — LEAP 자체는 엄지-검지 최소 0.3mm 까지 닿는다.
 
-그래서 **기본을 `--retargeter dex` 로 되돌렸다.** `ours` 는 지우지 않고
-`--retargeter ours` 로 남긴다. 위 표의 근거이자, 왜 손끝 사이 거리를 목표에 넣어야
-하는지를 보여 주는 대조군이다.
+그래서 한때 **기본을 `--retargeter dex` 로** 두었다. 그런데 실제로 쓰면 문제가
+남았다. 손을 쥐어도 로봇이 손처럼 쥐지 않는다. 이 자가 그것을 못 잡는다.
 
-이 결정에는 재현성 기준도 걸려 있다. `ours` 는 사람마다 매번 엄지 정렬
-캘리브레이션이 필요하고 roll 자유도가 미결정이라 같은 사람이 두 번 해도 결과가
-갈린다. dex 는 그 단계가 아예 없다.
+#### 그 자가 놓친 축 — 자세 충실도
 
-| | `ours` | `dex` |
+집기에서 손끝 간격이 중요한 것은 맞다. 하지만 **텔레오퍼레이션에서 사람이 먼저
+보는 것**은 자세다. 사람이 주먹을 쥐면 MCP(밑마디)가 접혀야 한다. 그런데 손목->손끝
+벡터만 목표로 주면 MCP 굽힘이 **널스페이스**에 놓인다. MCP 를 접든 펴든 손끝 위치는
+맞출 수 있으니, 최적화가 MCP 를 오히려 펴고 굽힘을 전부 PIP/DIP 에 몰아넣는 해로
+가도 지표상 벌점이 0 이다.
+
+같은 녹화 데이터로 그 축을 쟀다(`python scripts/phase1/p1_diag_pose_fidelity.py`,
+재현 가능). 검지/중지/약지 평균 굽힘각(deg), 굽힘이 양수:
+
+```
+                mcp사람  mcp로봇   pip사람  pip로봇   dip사람  dip로봇   지터   핀치mm
+ours      편 손     9.7    12.2     20.9    19.5     15.6    31.2   1.17    205.2
+          주먹     60.3    58.1     82.0    58.0     67.1    93.4   2.65     96.6
+dexpilot  편 손     9.7    18.2     20.9     0.8     15.6     0.1   0.09    118.9
+          주먹     60.3    -0.3     82.0    40.8     67.1    91.1   1.98     32.9
+vector    편 손     9.7    17.9     20.9     0.2     15.6     0.8   0.12    116.0
+          주먹     60.3    -0.3     82.0    48.1     67.1    86.8   2.20     36.1
+```
+
+주먹 줄의 `mcp로봇` 열이 전부다. 사람은 60.3도 접는데 dex 는 **두 설정 모두 -0.3도**,
+즉 접기는커녕 미세하게 편다. 굽힘은 전부 PIP/DIP 로 간다. 손끝은 제자리에 있으니
+목표 함수는 만족하지만, 눈에는 **주먹이 아니라 갈고리**다. "손 관절을 인식해도
+로봇이 손처럼 움직이지 않는다"의 정체가 이것이었다. 파라미터 튜닝으로 안 고쳐진
+이유도 같다 — 목표 함수에 그 항이 아예 없어서 어떤 값을 넣어도 벌점이 안 생긴다.
+
+`ours` 는 손끝뿐 아니라 **앞마디(DIP)까지** 목표로 준다. 목표가 8개라 MCP 가
+널스페이스에서 빠져나오고, 그래서 60.3 -> 58.1 로 따라온다. 정지 지터도 1.2~2.7도로
+쓸 만하다(한때 `ours` 가 떨린다고 본 것은 재시도 시드 구조 탓이었고, 적응형 재시도
+기준으로 바꾼 뒤 해소됐다).
+
+#### 결론 — 자세를 기본으로, 핀치는 필요할 때 바꿔 쓴다
+
+**기본은 `--retargeter ours`(손끝 위치 IK)다.** dex 는 `--retargeter dex` 로 남긴다.
+둘은 서로 다른 것을 잘하고, 어느 쪽도 둘 다 되지는 않는다.
+
+| | `ours` (기본) | `dex` |
 |---|---|---|
 | 설치 | 이 저장소 코드 | `pip install dex_retargeting` |
 | LEAP 설정 | 없음 (URDF 실측) | 저자 배포 `leap_hand_right_dexpilot.yml` |
 | 캘리브레이션 | 필요 (사람마다, 매번) | 없음 |
-| 핀치 | 안 됨 | 됨 |
+| 주먹 MCP (사람 60.3도) | **58.1도** | -0.3도 |
+| 주먹 핀치 간격 | 96.6 mm | **32.9 mm** |
+| 속도 | 6.5 ms/frame | 3.7 ms/frame |
+
+재현성에서는 dex 가 낫다 — `ours` 는 사람마다 매번 엄지 정렬 캘리브레이션이 필요하고
+roll 자유도가 미결정이라 같은 사람이 두 번 해도 결과가 갈린다. 그걸 알면서도 자세
+쪽을 기본으로 두는 이유는, 텔레오퍼레이션이 **먼저 손처럼 보여야** 쓸 수 있기
+때문이다. 핀치는 Phase 2 에서 물체를 실제로 집어 보며 다시 판단한다. 두 축을 다
+만족하는 세 번째 방법(관절각 직접 매핑 + 손끝간 거리 보정)은 아직 미검증이다.
 
 ```bash
 git clone --depth 1 https://github.com/dexsuite/dex-urdf.git third_party/dex-urdf
@@ -253,7 +293,7 @@ pip install dex-retargeting torch --index-url https://download.pytorch.org/whl/c
 
 ---
 
-## 직접 구현한 리타겟팅 (`--retargeter ours`, 대조군)
+## 직접 구현한 리타겟팅 (`--retargeter ours`, 기본)
 
 손끝 절대 위치를 목표로 IK 를 푼다.
 
@@ -265,7 +305,7 @@ MediaPipe world 랜드마크에서, 로봇 쪽은 URDF 영점 자세에서 뽑�
 
 이렇게 하면 카메라 앞에서 손을 어떻게 들고 있든 회전·평행이동이 상쇄된다.
 크기는 손바닥 폭 비율로 매 프레임 맞춘다. LEAP 쪽은 90.9mm로 고정이고, 사람 쪽은
-MediaPipe가 추정한 값을 쓴다 — `check_hand_tracking.py`가 실측값과 그로부터 나온
+MediaPipe가 추정한 값을 쓴다 — `p1_1_check_hand_tracking.py`가 실측값과 그로부터 나온
 배율을 출력한다. 사람 손이 훨씬 작아 배율은 2배 안팎이 된다.
 
 관절각을 그대로 베끼지 않고 손끝을 목표로 IK를 푸는 이유는 두 손의 링크 길이와
@@ -365,7 +405,7 @@ DLS를 영점에서 출발시키면 크게 굽힌 손에서 갇힌다. 중지·�
 "손 흔들어 보니 따라오더라"는 검증이 아니다. 정답이 있는 시험을 만들었다.
 
 ```bash
-python scripts/test_retarget_roundtrip.py
+python scripts/phase1/p1_2_test_retarget_roundtrip.py
 ```
 
 LEAP을 알려진 자세에 두고, 그 자세에서 MediaPipe 배치의 가짜 사람 랜드마크를
@@ -437,18 +477,22 @@ leap_hand_mapping/
   joint_map.py      매핑 테이블 + 좌표 변환 (순수 numpy, OS 무관)
   real_hand.py      실기 드라이버. 전류 제한 350mA 고정, 전류 상시 감시
   hand_tracker.py   웹캠 -> MediaPipe 21 랜드마크 (로봇을 모른다)
-  retarget_dex.py   dex-retargeting 어댑터. 기본 경로
-  retarget.py       직접 구현. 손바닥 좌표계 + 자코비안 DLS IK (--retargeter ours)
+  retarget.py       직접 구현. 손바닥 좌표계 + 자코비안 DLS IK. 기본 경로
+  retarget_dex.py   dex-retargeting 어댑터 (--retargeter dex)
 scripts/
-  verify_mapping_fk.py       PyBullet(URDF) vs MuJoCo 순기구학 교차검증
-  preflight_real_hand.py     실기 사전 점검 (토크를 켜지 않는다)
-  sweep_joints.py            관절 순차 구동 (시뮬 / 실기)
-  check_hand_tracking.py     웹캠 추적만 확인 (로봇 없이)
-  diag_thumb.py              엄지 리타겟팅 진단 (--retargeter ours 전용)
-  compare_retargeters.py     ours vs dex 를 녹화 데이터로 같은 자로 비교
-  teleop_mujoco.py           텔레오퍼레이션 본체
-  test_retarget_roundtrip.py 리타겟팅 기하 검증 (카메라 없이)
-  fetch_mediapipe_model.sh   MediaPipe 모델 내려받기
+  phase0/                            Phase 0 — 관절 매핑 확정 (문서 5장 "최대 함정")
+    p0_1_verify_mapping_fk.py        PyBullet(URDF) vs MuJoCo 순기구학 교차검증
+    p0_2_preflight_real_hand.py      실기 사전 점검 (토크를 켜지 않는다)
+    p0_3_sweep_joints.py             관절 순차 구동 육안 대조 (시뮬 / 실기)
+  phase1/                            Phase 1 — 웹캠 텔레오퍼레이션
+    p1_0_fetch_mediapipe_model.sh    MediaPipe 모델 내려받기 (최초 1회)
+    p1_1_check_hand_tracking.py      웹캠 추적만 확인 (로봇 없이)
+    p1_2_test_retarget_roundtrip.py  리타겟팅 기하 검증 (카메라 없이)
+    p1_3_teleop_mujoco.py            텔레오퍼레이션 본체
+    p1_diag_thumb.py                 [진단] 엄지 리타겟팅 (--retargeter ours 전용)
+    p1_diag_pose_fidelity.py         [진단] 자세 충실도. 사람 MCP/PIP/DIP 대 로봇
+    p1_diag_compare_retargeters.py   [진단] ours vs dex 를 녹화 데이터로 같은 자로 비교
+    p1_diag_tune_dex_scale.py        [진단] dex 배율 탐색 (upstream 1.6 을 바꾸지 말 것)
 docs/
   real_hand_bringup.md   실기 시작 절차
   teleop_howto.md        텔레오퍼레이션 실습 절차
@@ -485,7 +529,7 @@ pip install "jax[cuda12]" mujoco mujoco-mjx playground pybullet \
 pip install dex-retargeting
 pip install torch --index-url https://download.pytorch.org/whl/cpu   # CPU 빌드로 충분
 
-bash scripts/fetch_mediapipe_model.sh   # MediaPipe 1.x 는 모델을 패키지에 넣지 않는다
+bash scripts/phase1/p1_0_fetch_mediapipe_model.sh   # MediaPipe 1.x 는 모델을 패키지에 넣지 않는다
 ```
 
 GPU 확인 (문서 6장 — CPU 빌드가 깔리면 에러 없이 조용히 느려지기만 한다):

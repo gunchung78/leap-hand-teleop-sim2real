@@ -8,11 +8,11 @@
   4. 모터 ID 0~15 가 전부 응답하는지
   5. 현재 관절각과 전류
 
-sweep_joints.py --real 로 손을 움직이기 전에 항상 이걸 먼저 돌릴 것.
+p0_3_sweep_joints.py --real 로 손을 움직이기 전에 항상 이걸 먼저 돌릴 것.
 
 사용법:
-    python scripts/preflight_real_hand.py
-    python scripts/preflight_real_hand.py --port /dev/serial/by-id/usb-FTDI_...
+    python scripts/phase0/p0_2_preflight_real_hand.py
+    python scripts/phase0/p0_2_preflight_real_hand.py --port /dev/serial/by-id/usb-FTDI_...
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from leap_hand_mapping import joint_map as jm  # noqa: E402
 from leap_hand_mapping.real_hand import find_port  # noqa: E402
@@ -85,7 +85,7 @@ def main() -> int:
     sys.path.insert(
         0,
         os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             "third_party/LEAP_Hand_API/python",
         ),
     )
@@ -143,8 +143,8 @@ def main() -> int:
         print("\n" + "=" * 68)
         if not failed and not outside:
             print("점검 통과. 다음 단계:")
-            print("  python scripts/sweep_joints.py                     # 시뮬만 먼저")
-            print(f"  python scripts/sweep_joints.py --real --port {port} --joints 0")
+            print("  python scripts/phase0/p0_3_sweep_joints.py                     # 시뮬만 먼저")
+            print(f"  python scripts/phase0/p0_3_sweep_joints.py --real --port {port} --joints 0")
             print("  (관절 하나부터. 이상 없으면 --joints 없이 전체)")
         else:
             print("점검에서 문제가 나왔다. 위 안내를 먼저 처리할 것.")

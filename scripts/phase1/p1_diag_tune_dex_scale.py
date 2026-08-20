@@ -10,7 +10,7 @@ MediaPipe 의 추정 스케일에 따라 적정값이 달라진다. 너무 크�
 이 스크립트는 한 번 촬영해 둔 실제 랜드마크로 여러 배율을 **같은 데이터에** 돌려
 비교한다. 촬영이 한 번이라 배율끼리 조건이 같다.
 
-    python scripts/tune_dex_scale.py
+    python scripts/phase1/p1_diag_tune_dex_scale.py
 
 촬영 중에는 편 손 -> 주먹 -> 편 손 을 천천히 반복한다. 가동 범위 전체를 봐야
 배율이 큰 자세에서만 포화되는지 알 수 있다.
@@ -25,7 +25,7 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 from leap_hand_mapping.retarget_dex import DexRetargeter  # noqa: E402

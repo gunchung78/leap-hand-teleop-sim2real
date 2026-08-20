@@ -5,19 +5,19 @@
     "실기와 MuJoCo에 동일한 16차원 각도 벡터를 넣고 한 관절씩 순차 구동하여 육안 대조.
      매핑이 틀리면 즉시 드러난다."
 
-scripts/verify_mapping_fk.py 가 기하학적으로는 이미 매핑을 확정했지만, 그것은
+scripts/phase0/p0_1_verify_mapping_fk.py 가 기하학적으로는 이미 매핑을 확정했지만, 그것은
 어디까지나 URDF 모델끼리의 비교다. 실물 배선/모터 ID 가 도면대로인지는 실기를
 직접 돌려 봐야 알 수 있다. 이 스크립트가 그 마지막 한 칸을 채운다.
 
 사용법:
     # 시뮬레이터만 (실기 없이 먼저 확인)
-    python scripts/sweep_joints.py
+    python scripts/phase0/p0_3_sweep_joints.py
 
     # 실기까지 동시 구동
-    python scripts/sweep_joints.py --real
+    python scripts/phase0/p0_3_sweep_joints.py --real
 
     # 특정 관절만
-    python scripts/sweep_joints.py --real --joints 12 13 14 15
+    python scripts/phase0/p0_3_sweep_joints.py --real --joints 12 13 14 15
 
 실기 주의(문서 4.5):
   - Dynamixel Wizard 가 떠 있으면 포트를 점유해 연결이 안 된다. 먼저 종료할 것.
@@ -34,11 +34,11 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from leap_hand_mapping import joint_map as jm  # noqa: E402
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MJCF_SCENE = os.path.join(REPO, "third_party/mujoco_menagerie/leap_hand/scene_right.xml")
 
 

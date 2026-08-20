@@ -16,7 +16,7 @@ Phase 1 파이프라인을 실제로 돌려 보는 순서. **0단계부터 차�
 conda activate leap-hand
 cd ~/Project/leap-hand-teleop-sim2real
 
-bash scripts/fetch_mediapipe_model.sh    # 7.5MB. 저장소에 없다
+bash scripts/phase1/p1_0_fetch_mediapipe_model.sh    # 7.5MB. 저장소에 없다
 ls /dev/video*                           # 웹캠 확인
 
 # dex-retargeting 자산 (기본 리타겟터가 쓴다)
@@ -44,7 +44,7 @@ tasks API 는 모델을 패키지에 넣어 두지 않는다. 그래서 따로 �
 ## 1단계 — 추적만 확인 (로봇 없음)
 
 ```bash
-python scripts/check_hand_tracking.py
+python scripts/phase1/p1_1_check_hand_tracking.py
 ```
 
 창이 뜨고 손 위에 골격이 그려진다. 빨간 점 8개가 리타겟팅에 실제로 쓰는 점이다
@@ -61,7 +61,7 @@ python scripts/check_hand_tracking.py
 ### 오른손인데 `Right` 가 아니라면 — `--mirror`
 
 ```bash
-python scripts/check_hand_tracking.py --mirror
+python scripts/phase1/p1_1_check_hand_tracking.py --mirror
 ```
 
 MediaPipe 의 handedness 판정은 **입력이 거울상이 아니라고** 가정한다. 셀피처럼
@@ -90,7 +90,7 @@ LEAP 손바닥 폭이 90.9 mm 이므로 스케일은 약 1.92 배가 된다.
 ## 2단계 — 기하 검증 (카메라 없음)
 
 ```bash
-python scripts/test_retarget_roundtrip.py
+python scripts/phase1/p1_2_test_retarget_roundtrip.py
 ```
 
 로봇을 알려진 자세에 두고, 그 자세에서 가짜 사람 랜드마크를 만들어(사람 손
@@ -116,30 +116,44 @@ python scripts/test_retarget_roundtrip.py
 ## 3단계 — 시뮬만 텔레오퍼레이션
 
 ```bash
-python scripts/teleop_mujoco.py
+python scripts/phase1/p1_3_teleop_mujoco.py
 ```
 
 창이 둘 뜬다. 카메라 창과 MuJoCo 뷰어.
 
-기본 리타겟터는 **dex-retargeting**(`--retargeter dex`)다. **캘리브레이션이 없다** —
-손목 프레임을 매 프레임 랜드마크에서 추정하므로 사람마다 맞출 것이 없다. 바로 본
-루프가 시작된다. `q`(카메라 창 포커스) 또는 Ctrl-C 로 종료.
+기본 리타겟터는 **직접 구현한 손끝 위치 IK**(`--retargeter ours`)다. 시작 시
+**엄지 정렬 캘리브레이션이 돈다** — 손을 **펴서** 카메라에 보여 주면 30프레임을 모으고
+보정각을 출력한다. 그 뒤 본 루프가 시작된다. `q`(카메라 창 포커스) 또는 Ctrl-C 로 종료.
 
-배율은 upstream 기본값 1.6 을 건드리지 않는다 — LEAP 팀의 `avp_leap.py` 와 dex 의
-LEAP 설정이 독립적으로 같은 값에 도달했다. `scripts/tune_dex_scale.py` 의 "벡터오차"는
-목표를 얼마나 정확히 따라갔는지일 뿐 **조작감이 아니다.** 1.0 이 오차는 낮았지만 손은
-1.6 이 나았다.
+dex-retargeting 은 `--retargeter dex` 로 남아 있다. **둘은 서로 다른 것을 잘한다.**
 
-직접 구현한 위치 IK 도 `--retargeter ours` 로 남아 있다. 네 손가락 추종감은 이쪽이
-더 붙지만 **엄지-검지 핀치가 안 된다**(손끝 간격이 85mm 에서 막힌다). 근거와 재현
-방법은 README 의 "어느 쪽을 기본으로 쓸 것인가" 절, 그리고:
+| | ours (기본) | dex (dexpilot) |
+|---|---|---|
+| 주먹 쥘 때 MCP | 사람 60.3° -> **58.1°** | 사람 60.3° -> **-0.3°** |
+| 주먹의 엄지-검지 간격 | 96.6 mm | **32.9 mm** |
+| 지터 (정지 자세) | 1.2~2.7° | 0.1~2.0° |
+| 캘리브레이션 | 필요 | 없음 |
+
+dex 는 손목->손끝 **벡터**만 목표로 잡아서, 손끝 위치만 맞으면 MCP 를 접든 펴든
+벌점이 없다. 그래서 주먹을 쥐면 MCP 를 오히려 펴고 굽힘을 PIP/DIP 에 몰아넣는다.
+숫자로는 잘 맞지만 눈으로는 **주먹이 아니라 갈고리**다. 이것이 "손 관절을 인식해도
+로봇이 손처럼 안 움직인다"의 정체였다. ours 는 앞마디까지 목표로 주므로 MCP 가
+따라온다. 대신 사람과 LEAP 의 비율 차이 때문에 엄지-검지가 끝까지 안 닿는다.
+
+**지금은 자세 쪽을 기본으로 둔다.** 텔레오퍼레이션에서 사람이 먼저 보는 것이
+자세이고, 핀치는 Phase 2 에서 물체를 실제로 집어 보며 다시 판단한다.
+
+재현:
 
 ```bash
-python scripts/compare_retargeters.py
+python scripts/phase1/p1_diag_pose_fidelity.py       # 자세 충실도 (MCP/PIP/DIP)
+python scripts/phase1/p1_diag_compare_retargeters.py # 엄지-검지 손끝 간격
 ```
 
-`ours` 를 쓸 때만 시작 시 **엄지 정렬 캘리브레이션이 돈다.** 손을 **펴서** 카메라에
-보여 주면 30프레임을 모으고 보정각을 출력한다.
+dex 를 쓸 때 배율은 upstream 기본값 1.6 을 건드리지 않는다 — LEAP 팀의 `avp_leap.py` 와
+dex 의 LEAP 설정이 독립적으로 같은 값에 도달했다. `scripts/phase1/p1_diag_tune_dex_scale.py` 의
+"벡터오차"는 목표를 얼마나 정확히 따라갔는지일 뿐 **조작감이 아니다.** 1.0 이 오차는
+낮았지만 손은 1.6 이 나았다.
 
 ### 확인할 것
 
@@ -183,12 +197,12 @@ python scripts/compare_retargeters.py
 
 ### 엄지가 이상할 때
 
-`--retargeter ours` 전용 진단이다. 기본값인 `dex` 로 돌리는 중이라면 해당 없다 —
+`--retargeter ours` 전용 진단이다. `--retargeter dex` 로 돌리는 중이라면 해당 없다 —
 그쪽은 손목 프레임을 매 프레임 추정하고 벡터를 맞추므로 엄지 캘리브레이션 자체가
 없다.
 
 ```bash
-python scripts/diag_thumb.py
+python scripts/phase1/p1_diag_thumb.py
 ```
 
 캘리브레이션 후 네 자세(편 손 / 엄지만 붙임 / 핀치 / 주먹)를 순서대로 시키면서
@@ -211,7 +225,7 @@ python scripts/diag_thumb.py
 ## 4단계 — IK 목표점 보기 (진단용)
 
 ```bash
-python scripts/teleop_mujoco.py --pybullet-gui
+python scripts/phase1/p1_3_teleop_mujoco.py --pybullet-gui
 ```
 
 PyBullet 창이 하나 더 뜨고, IK 가 쫓고 있는 **목표점 8개**가 색 구슬로 보인다.
@@ -237,11 +251,12 @@ PyBullet 창이 하나 더 뜨고, IK 가 쫓고 있는 **목표점 8개**가 �
 | 로봇이 덜 굽음 | `--scale 2.5` 처럼 크게 |
 | 검출이 자꾸 끊김 | 조명·거리 먼저. 그래도면 `--width 1280 --height 720` |
 | 로봇이 덜 움직임 (dex) | `--dex-scale 2.0` 처럼 올린다 (기본 1.6) |
-| 손가락이 늘 뻗어 있음 (dex) | 배율 포화. `python scripts/tune_dex_scale.py` 로 다시 잰다 |
+| 손가락이 늘 뻗어 있음 (dex) | 배율 포화. `python scripts/phase1/p1_diag_tune_dex_scale.py` 로 다시 잰다 |
 | 떨림 (dex) | `--dex-alpha 0.1` (기본 0.2, 작을수록 부드럽고 느리다) |
 | 집기가 부정확 (dex) | `--dex-type dexpilot` 인지 확인. `vector` 는 손끝간 거리를 안 본다 |
-| 엄지-검지 핀치가 안 맞음 (ours) | `ours` 의 구조적 한계다. 기본값 `dex` 를 쓸 것 |
-| 엄지만 엉뚱함 (ours) | `python scripts/diag_thumb.py` 로 원인을 가른다 |
+| 엄지-검지 핀치가 안 맞음 (ours) | `ours` 의 구조적 한계다. 집기가 급하면 `--retargeter dex` |
+| 주먹이 갈고리처럼 됨 (dex) | `dex` 의 구조적 한계다. 기본값 `ours` 를 쓸 것 |
+| 엄지만 엉뚱함 (ours) | `python scripts/phase1/p1_diag_thumb.py` 로 원인을 가른다 |
 | 떨리는데 재시도가 0 (ours) | `--smoothing 0.2` |
 | 재시도가 매 프레임 5.0 (ours) | 이제 적응형이라 정상 상태에서는 0 근처다. 5.0 이면 진짜 국소최소 |
 
@@ -269,7 +284,7 @@ PyBullet 창이 하나 더 뜨고, IK 가 쫓고 있는 **목표점 8개**가 �
 ```bash
 # Dynamixel Wizard 가 떠 있으면 종료할 것
 echo 1 | sudo tee /sys/bus/usb-serial/devices/ttyUSB0/latency_timer
-python scripts/preflight_real_hand.py
+python scripts/phase0/p0_2_preflight_real_hand.py
 ```
 
 토크를 켜지 않고 연결만 확인한다. 손은 힘없이 늘어져 있어야 정상이다.
@@ -277,7 +292,7 @@ python scripts/preflight_real_hand.py
 ### 6-2. 손을 편 자세로 시작
 
 ```bash
-python scripts/teleop_mujoco.py --real
+python scripts/phase1/p1_3_teleop_mujoco.py --real
 ```
 
 **카메라 앞에 손을 보이기 전에** 로봇이 영점(편 자세)에 있는지 확인한다.
@@ -321,7 +336,7 @@ Ctrl-C 로 나가면 스크립트가 영점으로 되돌린 뒤 토크를 끈다
 `--camera 1` 로 다른 장치를 시도.
 
 **`MediaPipe 모델이 없다`**
-`bash scripts/fetch_mediapipe_model.sh`
+`bash scripts/phase1/p1_0_fetch_mediapipe_model.sh`
 
 **손이 한 번도 안 잡힘**
 조명(역광 아닌지), 거리(40~60 cm), 손이 화면에 다 들어오는지. `--hand Left` 를
@@ -331,7 +346,7 @@ Ctrl-C 로 나가면 스크립트가 영점으로 되돌린 뒤 토크를 끈다
 `--mirror` 를 토글한다. 1단계에서 `Right` 로 잡히는지부터 확인.
 
 **손가락 대응이 어긋남 (검지를 굽혔는데 중지가 움직임)**
-리타겟팅이 아니라 매핑 문제다. `python scripts/sweep_joints.py --joints 0` 으로
+리타겟팅이 아니라 매핑 문제다. `python scripts/phase0/p0_3_sweep_joints.py --joints 0` 으로
 Phase 0 매핑부터 다시 확인. 시뮬에서 이미 어긋나면 코드 회귀다.
 
 **로봇이 계속 덜덜 떨림**

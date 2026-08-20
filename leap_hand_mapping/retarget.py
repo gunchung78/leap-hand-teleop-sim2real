@@ -4,11 +4,17 @@ hand_tracker 가 준 21개 랜드마크를 로봇 관절각으로 바꾼다. 공
 Bidex_VisionPro_Teleop/avp_leap.py 의 PyBullet IK 방식을 그대로 따르되, 입력을
 Apple Vision Pro 대신 MediaPipe 로 바꾸고 스케일링을 명시적으로 만들었다.
 
-기본 경로가 아니다 (`--retargeter ours`)
---------------------------------------
-기본은 retarget_dex.py(dex-retargeting)다. 이 파일은 **대조군**으로 남긴다. 네
-손가락 추종은 이쪽이 더 정확하지만(손끝 잔차 0.5mm) 엄지-검지 핀치가 구조적으로
-안 된다. 아래 "왜 엄지만 안 맞는가" 주석과 scripts/compare_retargeters.py 참고.
+기본 경로다 (`--retargeter ours`)
+-------------------------------
+한때 retarget_dex.py(dex-retargeting)를 기본으로 두었다가 되돌렸다. 근거는
+scripts/phase1/p1_diag_pose_fidelity.py 의 실측이다. 주먹을 쥘 때 사람 MCP 가 60.3도
+접히는데 dex 는 -0.3도(오히려 폄)로 가고, 이쪽은 58.1도로 따라온다. dex 는 손목->손끝
+벡터만 목표라 MCP 가 널스페이스에 놓여서, 손끝만 맞으면 손 모양은 아무래도 상관없는
+해로 수렴한다. 눈에는 주먹이 아니라 갈고리로 보인다.
+
+대신 이쪽은 엄지-검지 핀치가 구조적으로 안 닿는다(주먹에서 96.6mm, dex 는 32.9mm).
+아래 "왜 엄지만 안 맞는가" 주석과 scripts/phase1/p1_diag_compare_retargeters.py 참고.
+집기가 중요한 국면에서는 `--retargeter dex` 로 바꿔 쓴다.
 
 왜 IK 인가
 ---------
@@ -490,7 +496,7 @@ class LeapRetargeter:
     # 사람 엄지 끝 랜드마크를 검지 끝에 **정확히 겹쳐** 놓고(= 간격 0mm, 무한히 좋은
     # 3D 센서) compute_targets 를 다시 돌리면 목표 간격이 여전히 187mm 다(핀치 자세
     # 평균, 최소 129mm). 센서를 바꿔도 이 값은 안 변한다. MediaPipe 의 z 추정 노이즈는
-    # **떨림**의 원인이지 **안 닿음**의 원인이 아니다. scripts/compare_retargeters.py.
+    # **떨림**의 원인이지 **안 닿음**의 원인이 아니다. scripts/phase1/p1_diag_compare_retargeters.py.
     #
     # 여기에 손끝 쌍 거리 목표를 직접 넣지 않는다
     # ----------------------------------------
