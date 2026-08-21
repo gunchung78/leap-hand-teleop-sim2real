@@ -72,6 +72,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="앞마디 목표를 LEAP 말단 마디 길이로 되짚을지, 사람에서 스케일할지")
     ap.add_argument("--dip-weight", type=float, default=0.3,
                     help="앞마디 목표의 가중치. 손끝은 항상 1.0 이다")
+    ap.add_argument("--thumb-mode", default="map", choices=["map", "ik"],
+                    help="[--retargeter ours] map: 엄지 모양은 관절각 매핑, 핀치만 IK (기본). "
+                         "ik: 엄지도 손끝 위치 IK (예전 동작, 비교용)")
     ap.add_argument("--no-thumb-couple", action="store_true",
                     help="[--retargeter ours] 엄지 목표를 검지에 묶지 않는다. "
                          "끄면 사람이 엄지를 붙여도 로봇은 안 붙는다 (비교용)")
@@ -127,6 +130,7 @@ def main() -> int:
             max_speed=args.max_speed,
             dip_weight=args.dip_weight,
             thumb_couple=not args.no_thumb_couple,
+            thumb_mode=args.thumb_mode,
         )
         print("리타겟팅: 직접 구현 (손끝 위치 IK)"
               + ("" if not args.no_thumb_couple else "  [엄지 결합 꺼짐]"))
@@ -222,10 +226,13 @@ def main() -> int:
                 lost_since = None
                 q_prev = q_cmd
                 q_cmd = retargeter.retarget(obs.world, dt=dt)
-                tip_errors.append(
-                    float(np.nanmean(retargeter.tip_error()))
-                    if use_dex else float(retargeter.tip_error()[1::2].mean())
-                )
+                if use_dex:
+                    tip_errors.append(float(np.nanmean(retargeter.tip_error())))
+                else:
+                    e = retargeter.tip_error()[1::2]          # 손끝 4개 (index, middle, ring, thumb)
+                    if args.thumb_mode == "map":
+                        e = e[:3]   # 엄지는 손끝 목표를 쫓지 않는다(관절각 매핑). 잔차가 뜻이 없다
+                    tip_errors.append(float(e.mean()))
 
                 restarts.append(retargeter.last_restarts)
                 jitter.append(float(np.abs(q_cmd - q_prev).max()))
