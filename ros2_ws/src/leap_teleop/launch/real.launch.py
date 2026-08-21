@@ -45,6 +45,8 @@ def generate_launch_description():
         DeclareLaunchArgument("kD", default_value="200.0"),
         DeclareLaunchArgument("curr_lim", default_value="350.0", description="Lite 는 350. 올리지 말 것"),
         DeclareLaunchArgument("max_speed", default_value="8.0"),
+        DeclareLaunchArgument("smoothing", default_value="0.4", description="리타겟 지수 평활. 떨리면 0.2"),
+        DeclareLaunchArgument("deadband", default_value="0.5", description="리타겟 출력 데드밴드(deg). 0=끔"),
         DeclareLaunchArgument("current_warn", default_value="400.0",
                               description="브리지 전류 동결 임계 (업스트림 리더 단위 = raw x 1.34; 한계 350 은 ~469)"),
         DeclareLaunchArgument("engage_speed", default_value="1.0",
@@ -61,7 +63,7 @@ def generate_launch_description():
         launch_arguments={
             "camera": lc("camera"), "hand": lc("hand"), "mirror": lc("mirror"),
             "show": lc("show"), "viewer": lc("viewer"), "max_speed": lc("max_speed"),
-            "tracker": lc("tracker"),
+            "tracker": lc("tracker"), "smoothing": lc("smoothing"), "deadband": lc("deadband"),
         }.items(),
         condition=IfCondition(lc("sim")),
     )
@@ -75,7 +77,8 @@ def generate_launch_description():
         Node(package="leap_teleop", executable="retarget_node", name="retarget_node",
              output="screen", emulate_tty=True,
              condition=IfCondition(PythonExpression(["'", lc("sim"), "' == 'false' and '", lc("tracker"), "' == 'true'"])),
-             parameters=[{"max_speed": lc("max_speed")}]),
+             parameters=[{"max_speed": lc("max_speed"), "smoothing": lc("smoothing"),
+                          "deadband_deg": lc("deadband")}]),
     ]
 
     bridge = Node(package="leap_teleop", executable="hand_bridge_node", name="hand_bridge_node",

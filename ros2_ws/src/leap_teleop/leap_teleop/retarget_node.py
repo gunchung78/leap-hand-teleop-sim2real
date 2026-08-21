@@ -14,9 +14,20 @@
   펴지면 물건을 놓치기 때문이다. 넘어가면 release_time(1 s) 에 걸쳐 영점으로 램프하고,
   램프 중에는 이 노드가 타이머로 명령을 낸다(그때 stamp 는 now — 합성 명령이다).
 
+떨림 (지터)
+  정지한 손에서도 리타겟 출력이 프레임마다 0.5~1도(최대 4도) 흔들린다 — MediaPipe 랜드마크
+  노이즈 + IK 가 매 프레임 재시도 시드 사이를 오가는 탓이다. 실기는 kP 600 으로 그걸 전부
+  따라가서 눈에 띄게 떤다. 두 손잡이:
+    smoothing   리타겟터의 지수 평활. 0.4 -> 0.2 로 내리면 정지 지터가 절반(녹화 실측 1.05 -> 0.55도)
+    deadband_deg 출력 데드밴드. 직전에 보낸 명령과의 최대 관절 차이가 이 값보다 작으면 **직전
+                명령을 그대로 다시 보낸다.** 정지 떨림은 0 이 되고, 그 이상 움직이면 그대로 따라간다.
+                기본 0.5도. 0 이면 끔
+  시뮬과 실기가 같은 명령을 받게 하려고 여기(리타겟 출력)에서 거른다. 브리지에서 거르면
+  트윈과 실기가 달라진다.
+
 파라미터
   smoothing(0.4) max_speed(8.0 rad/s) distal_mode("leap") scale(0.0=자동)
-  hold_timeout(1.5) release_time(1.0)
+  hold_timeout(1.5) release_time(1.0) deadband_deg(0.5)
 """
 
 from __future__ import annotations
@@ -45,7 +56,11 @@ class RetargetNode(Node):
         self.declare_parameter("scale", 0.0)
         self.declare_parameter("hold_timeout", 1.5)
         self.declare_parameter("release_time", 1.0)
+        self.declare_parameter("deadband_deg", 0.5)
         p = lambda n: self.get_parameter(n).value  # noqa: E731
+        self.deadband = np.radians(float(p("deadband_deg")))
+        self._q_sent = None
+        self._held = 0
 
         jm.self_check()
         scale = float(p("scale")) or None
@@ -92,7 +107,12 @@ class RetargetNode(Node):
         t0 = time.perf_counter()
         self.q = self.rt.retarget(pts, dt=dt)
         self._ms.append((time.perf_counter() - t0) * 1000)
-        self._publish(self.q, msg.header.stamp)
+        q_out = self.q
+        if (self.deadband > 0 and self._q_sent is not None
+                and np.abs(self.q - self._q_sent).max() < self.deadband):
+            q_out = self._q_sent            # 데드밴드 안: 직전 명령 유지 (정지 떨림 제거)
+            self._held += 1
+        self._publish(q_out, msg.header.stamp)
 
         self._lat.append((self.get_clock().now() - stamp).nanoseconds * 1e-6)
         self._n += 1
@@ -102,6 +122,7 @@ class RetargetNode(Node):
                 f"명령 {self._n}  리타겟 {np.mean(self._ms[-150:]):.1f} ms"
                 f"  촬영->명령 지연 {np.mean(self._lat[-150:]):.1f} ms"
                 f"  손끝잔차 {np.mean(self.rt.tip_error()[1::2]) * 1000:.1f} mm"
+                f"  데드밴드 유지 {self._held}/{self._n}"
             )
             self._last_log = now
 
@@ -127,6 +148,7 @@ class RetargetNode(Node):
     def _publish(self, q: np.ndarray, stamp, frame_id: str = "leap_mujoco") -> None:
         # frame_id 로 "추적에서 나온 명령"과 "손 유실 램프(합성)"를 구분한다. 지표 스크립트가
         # 지연을 잴 때 합성 명령(stamp=now)을 빼기 위해서다.
+        self._q_sent = np.array(q, dtype=float, copy=True)
         msg = JointState()
         msg.header.stamp = stamp
         msg.header.frame_id = frame_id
