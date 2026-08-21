@@ -331,7 +331,7 @@ MediaPipe의 handedness 판정은 입력이 거울상이 아니라고 가정한�
 | `tracker_node` | 웹캠 → MediaPipe 21점 → `/hand/landmarks`. 손 없으면 publish 안 함. `show:=true` 면 카메라 창 + 손 위치 틀 |
 | `retarget_node` | `LeapRetargeter`(7cccfdd 손끝 IK) 호출 → `/leap/joint_cmd`. 손 유실 1.5 s 까지 유지, 그 뒤 1 s 에 걸쳐 영점 |
 | `sim_node` | `/leap/joint_cmd` → MuJoCo `ctrl` → 물리 스텝(60 Hz) → `/sim/joint_states`. qpos 를 직접 넣지 않는다 |
-| `hand_bridge_node` | 실기로 나가는 **유일한 경로.** 데드맨 `/teleop/enable`(기본 false), 시작 시 실기 자세 동기, ON 직후 1 rad/s 로 **천천히 합류**한 뒤 8 rad/s, 클립, `|전류| > 300` 이면 명령 동결, `safe_leaphand_command` 변환, `/real/joint_states` 발행 |
+| `hand_bridge_node` | 실기로 나가는 **유일한 경로.** 데드맨 `/teleop/enable`(기본 false), 시작 시 실기 자세 동기, ON 직후 1 rad/s 로 **천천히 합류**한 뒤 8 rad/s, 클립, `|전류| > 400` 이 100 ms 연속이면 명령 동결, `safe_leaphand_command` 변환, `/real/joint_states` 발행 |
 | `leaphand_node.py` | **업스트림 그대로**(+패치: 포트 파라미터, 시작 시 **현재 자세 유지** `hold_on_start`). 런치에서 `kP 600 / curr_lim 350 / port by-id` 만 넘긴다 |
 | `fake_hand_node` | 업스트림 인터페이스만 흉내내는 더미. 실기 없이 배선·데드맨·전류 동결 시험 |
 
