@@ -13,6 +13,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -36,12 +37,12 @@ def generate_launch_description():
     return LaunchDescription(args + [
         Node(package="leap_teleop", executable="tracker_node", name="tracker_node",
              output="screen", emulate_tty=True, condition=IfCondition(lc("tracker")),
-             parameters=[{"camera": lc("camera"), "hand": lc("hand"),
+             parameters=[{"camera": ParameterValue(lc("camera"), value_type=int), "hand": lc("hand"),
                           "mirror": lc("mirror"), "show": lc("show")}]),
         Node(package="leap_teleop", executable="retarget_node", name="retarget_node",
              output="screen", emulate_tty=True, condition=IfCondition(lc("tracker")),
-             parameters=[{"smoothing": lc("smoothing"), "max_speed": lc("max_speed"),
-                          "deadband_deg": lc("deadband"), "restart_mm": lc("restart_mm")}]),
+             parameters=[{"smoothing": ParameterValue(lc("smoothing"), value_type=float), "max_speed": ParameterValue(lc("max_speed"), value_type=float),
+                          "deadband_deg": ParameterValue(lc("deadband"), value_type=float), "restart_mm": ParameterValue(lc("restart_mm"), value_type=float)}]),
         Node(package="leap_teleop", executable="sim_node", name="sim_node",
              output="screen", emulate_tty=True,
              parameters=[{"viewer": lc("viewer")}]),

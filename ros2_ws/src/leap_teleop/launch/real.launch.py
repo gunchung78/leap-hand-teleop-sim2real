@@ -25,6 +25,7 @@ from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 DEFAULT_PORT = "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBIN91W-if00-port0"
 
@@ -62,10 +63,10 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory("leap_teleop"), "launch", "sim.launch.py")),
         launch_arguments={
-            "camera": lc("camera"), "hand": lc("hand"), "mirror": lc("mirror"),
-            "show": lc("show"), "viewer": lc("viewer"), "max_speed": lc("max_speed"),
-            "tracker": lc("tracker"), "smoothing": lc("smoothing"), "deadband": lc("deadband"),
-            "restart_mm": lc("restart_mm"),
+            "camera": ParameterValue(lc("camera"), value_type=int), "hand": lc("hand"), "mirror": lc("mirror"),
+            "show": lc("show"), "viewer": lc("viewer"), "max_speed": ParameterValue(lc("max_speed"), value_type=float),
+            "tracker": lc("tracker"), "smoothing": ParameterValue(lc("smoothing"), value_type=float), "deadband": lc("deadband"),
+            "restart_mm": ParameterValue(lc("restart_mm"), value_type=float),
         }.items(),
         condition=IfCondition(lc("sim")),
     )
@@ -74,25 +75,25 @@ def generate_launch_description():
         Node(package="leap_teleop", executable="tracker_node", name="tracker_node",
              output="screen", emulate_tty=True,
              condition=IfCondition(PythonExpression(["'", lc("sim"), "' == 'false' and '", lc("tracker"), "' == 'true'"])),
-             parameters=[{"camera": lc("camera"), "hand": lc("hand"),
+             parameters=[{"camera": ParameterValue(lc("camera"), value_type=int), "hand": lc("hand"),
                           "mirror": lc("mirror"), "show": lc("show")}]),
         Node(package="leap_teleop", executable="retarget_node", name="retarget_node",
              output="screen", emulate_tty=True,
              condition=IfCondition(PythonExpression(["'", lc("sim"), "' == 'false' and '", lc("tracker"), "' == 'true'"])),
-             parameters=[{"max_speed": lc("max_speed"), "smoothing": lc("smoothing"),
-                          "deadband_deg": lc("deadband"), "restart_mm": lc("restart_mm")}]),
+             parameters=[{"max_speed": ParameterValue(lc("max_speed"), value_type=float), "smoothing": ParameterValue(lc("smoothing"), value_type=float),
+                          "deadband_deg": ParameterValue(lc("deadband"), value_type=float), "restart_mm": ParameterValue(lc("restart_mm"), value_type=float)}]),
     ]
 
     bridge = Node(package="leap_teleop", executable="hand_bridge_node", name="hand_bridge_node",
                   output="screen", emulate_tty=True,
-                  parameters=[{"max_speed": lc("max_speed"), "current_warn": lc("current_warn"),
-                               "poll_rate": lc("poll_rate"), "engage_speed": lc("engage_speed")}])
+                  parameters=[{"max_speed": ParameterValue(lc("max_speed"), value_type=float), "current_warn": ParameterValue(lc("current_warn"), value_type=float),
+                               "poll_rate": ParameterValue(lc("poll_rate"), value_type=float), "engage_speed": ParameterValue(lc("engage_speed"), value_type=float)}])
 
     real = Node(package="leap_hand", executable="leaphand_node.py", name="leaphand_node",
                 output="screen", emulate_tty=True,
                 condition=UnlessCondition(lc("fake")),
-                parameters=[{"kP": lc("kP"), "kI": 0.0, "kD": lc("kD"),
-                             "curr_lim": lc("curr_lim"), "port": lc("port")}])
+                parameters=[{"kP": ParameterValue(lc("kP"), value_type=float), "kI": 0.0, "kD": ParameterValue(lc("kD"), value_type=float),
+                             "curr_lim": ParameterValue(lc("curr_lim"), value_type=float), "port": lc("port")}])
     fake = Node(package="leap_teleop", executable="fake_hand_node", name="fake_hand_node",
                 output="screen", emulate_tty=True, condition=IfCondition(lc("fake")))
 
