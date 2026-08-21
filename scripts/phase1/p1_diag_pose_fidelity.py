@@ -27,7 +27,7 @@ PIP/DIP 에 굽힘을 몰아넣는 해로 가도 지표상 벌점이 없다. 결
 
 쓰는 법
 ------
-    python scripts/phase1/p1_diag_thumb.py --save thumb_capture.npz   # 먼저 녹화
+    python scripts/phase1/p1_diag_record_poses.py   # 먼저 녹화 (SPACE 로 자세마다 시작)
     python scripts/phase1/p1_diag_pose_fidelity.py
 """
 
@@ -101,7 +101,7 @@ def main() -> int:
 
     if not os.path.exists(args.capture):
         print(f"녹화 파일이 없다: {args.capture}")
-        print("먼저: python scripts/phase1/p1_diag_thumb.py --save thumb_capture.npz")
+        print("먼저: python scripts/phase1/p1_diag_record_poses.py")
         return 2
 
     import mujoco

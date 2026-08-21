@@ -74,8 +74,9 @@ def main() -> int:
     ap.add_argument("--mirror", action="store_true")
     ap.add_argument("--hold", type=float, default=3.0, help="자세당 유지 시간(초)")
     ap.add_argument("--no-window", action="store_true")
-    ap.add_argument("--save", default="thumb_capture.npz",
-                    help="랜드마크를 이 파일에 저장한다. 카메라 없이 재현·검증하는 데 쓴다")
+    ap.add_argument("--save", default="",
+                    help="랜드마크를 이 파일에 저장한다. **타이머 기반이라 자세를 잡는 도중이 "
+                         "섞인다.** 오프라인 진단용 녹화는 p1_diag_record_poses.py 를 쓸 것")
     args = ap.parse_args()
 
     import cv2
