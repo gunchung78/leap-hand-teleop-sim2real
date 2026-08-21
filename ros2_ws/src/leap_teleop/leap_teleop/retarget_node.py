@@ -25,6 +25,7 @@ import time
 
 import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import JointState, PointCloud2
@@ -106,7 +107,7 @@ class RetargetNode(Node):
 
     def _release_tick(self) -> None:
         """손을 오래 놓치면 천천히 영점으로. 그 전까지는 아무것도 안 한다(하류가 직전 자세 유지)."""
-        if self._last_rx is None:
+        if not rclpy.ok() or self._last_rx is None:
             return
         gone = time.time() - self._last_rx
         if gone <= self.hold_timeout:
@@ -143,7 +144,7 @@ def main(args=None) -> None:
     node = RetargetNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
