@@ -21,7 +21,7 @@
 
 쓰는 법
 ------
-    python scripts/phase1/p1_diag_thumb.py --save thumb_capture.npz     # 먼저 녹화
+    python scripts/phase1/p1_diag_record_poses.py   # 먼저 녹화 (SPACE 로 자세마다 시작)
     python scripts/phase1/p1_diag_compare_retargeters.py
 """
 
@@ -57,12 +57,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--capture", default=os.path.join(REPO, "thumb_capture.npz"),
-                    help="p1_diag_thumb.py --save 로 만든 녹화 파일")
+                    help="p1_diag_record_poses.py 로 만든 녹화 파일")
     args = ap.parse_args()
 
     if not os.path.exists(args.capture):
         print(f"녹화 파일이 없다: {args.capture}\n"
-              f"  python scripts/phase1/p1_diag_thumb.py --save {args.capture}")
+              f"  python scripts/phase1/p1_diag_record_poses.py --save {args.capture}")
         return 1
 
     d = np.load(args.capture, allow_pickle=True)

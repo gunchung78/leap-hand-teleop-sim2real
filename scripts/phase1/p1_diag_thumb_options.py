@@ -30,7 +30,7 @@ A2 를 채택해 본 경로에 넣었다. 이 스크립트는 그 결정의 근�
 
 쓰는 법
 ------
-    python scripts/phase1/p1_diag_thumb.py --save thumb_capture.npz   # 먼저 녹화
+    python scripts/phase1/p1_diag_record_poses.py   # 먼저 녹화 (SPACE 로 자세마다 시작)
     python scripts/phase1/p1_diag_thumb_options.py
 """
 
