@@ -173,11 +173,14 @@ class LeapRetargeter:
         smoothing: float = 0.4,
         max_speed: float = 8.0,
         pip_target: bool = False,
+        tip_mode: str = "realtip",
     ) -> None:
         import pybullet as p
 
         if distal_mode not in ("leap", "scaled"):
             raise ValueError("distal_mode 는 'leap' 또는 'scaled'")
+        if tip_mode not in ("realtip", "axis"):
+            raise ValueError("tip_mode 는 'realtip' 또는 'axis'")
 
         self.p = p
         self.gui = gui
@@ -246,23 +249,43 @@ class LeapRetargeter:
         # 녹화(정지 4자세) 실측: PIP 점을 더하면 프레임간 관절 변화 1.11 -> 0.33도(편 손),
         # 0.84 -> 0.56도(엄지 붙임). 손 모양 자체는 거의 그대로고 처리 35 -> 43 ms.
         # 손끝점 정의(realtip 이 축에서 20도 벗어난 패드점인 것)는 별개 문제라 여기서 안 건드린다.
+        # 손끝점 정의 (tip_mode)
+        # -------------------
+        # realtip  URDF 의 realtip 링크 원점. fingertip 링크 프레임에서 (20, -70, 15) mm — 손가락 축에서
+        #          19.7도(가로 16, 손바닥쪽 12) 벗어난 **패드 접촉점**이다 (엄지는 (0,-70,-15), 12도).
+        #          사람 손끝 랜드마크는 축 위의 점이라, 이걸 사람 손끝 방향에 놓으려면 IK 가 말단
+        #          링크를 20도 기울여야 한다 -> 편 손에서 DIP 가 10~14도 과굽힘 (녹화 실측: 사람 중지
+        #          DIP 5도 -> 로봇 15도, 약지 1 -> 13).
+        # axis     fingertip 링크 축 위의 점 (0, realtip의 축 성분, 0) = DIP 관절에서 70 mm. 사람 손끝과
+        #          같은 종류의 점이라 과굽힘이 없어진다. 대신 접촉점이 아니므로 실제 집기 위치는
+        #          패드만큼(15 mm) 어긋난다 — 텔레오퍼레이션 모양 우선이면 axis, 집기 우선이면 realtip.
+        self.tip_mode = tip_mode
         self.pip_target = pip_target
-        self.ee_spec: list[tuple[str, int]] = []      # (손가락, 링크) 목표 순서
+        self._tip_local = self._measure_tip_axis_offsets() if tip_mode == "axis" else {}
+        # (손가락, 역할, 링크, 링크 로컬 오프셋) 순서가 곧 목표/자코비안의 행 순서
+        self.ee_spec: list[tuple[str, str, int, np.ndarray]] = []
+        zero = np.zeros(3)
         for f in FINGERS:
             if pip_target and f in PIP_LINKS:
-                self.ee_spec.append((f, PIP_LINKS[f]))
-            self.ee_spec.append((f, EE_LINKS[f][0]))
-            self.ee_spec.append((f, EE_LINKS[f][1]))
-        self.ee_links = [link for _, link in self.ee_spec]
+                self.ee_spec.append((f, "pip", PIP_LINKS[f], zero))
+            self.ee_spec.append((f, "dip", EE_LINKS[f][0], zero))
+            if tip_mode == "axis":
+                self.ee_spec.append((f, "tip", EE_LINKS[f][0], self._tip_local[f]))
+            else:
+                self.ee_spec.append((f, "tip", EE_LINKS[f][1], zero))
+        self.ee_links = [link for _, _, link, _ in self.ee_spec]
         self.finger_slices = {
-            f: slice(min(i for i, (g, _) in enumerate(self.ee_spec) if g == f),
-                     max(i for i, (g, _) in enumerate(self.ee_spec) if g == f) + 1)
+            f: slice(min(i for i, e in enumerate(self.ee_spec) if e[0] == f),
+                     max(i for i, e in enumerate(self.ee_spec) if e[0] == f) + 1)
             for f in FINGERS
         }
-        self.tip_index = [i for i, (f, link) in enumerate(self.ee_spec) if link == EE_LINKS[f][1]]
-        self.dip_index = [i for i, (f, link) in enumerate(self.ee_spec) if link == EE_LINKS[f][0]]
+        self.tip_index = [i for i, e in enumerate(self.ee_spec) if e[1] == "tip"]
+        self.dip_index = [i for i, e in enumerate(self.ee_spec) if e[1] == "dip"]
         self.target_weights = np.repeat(np.ones(len(self.ee_spec)), 3)
         self.reference = self._measure_reference()
+        if tip_mode == "axis":
+            for f in FINGERS:      # 말단 마디 길이 = DIP 관절 -> 축 위 점
+                self.reference.distal_length[f] = float(np.linalg.norm(self._tip_local[f]))
         self._q = np.zeros(jm.NUM_JOINTS)
         self._last_targets: np.ndarray | None = None
         self.last_restarts = 0
@@ -271,6 +294,30 @@ class LeapRetargeter:
             self._create_debug_balls()
 
     # ------------------------------------------------------------------ 기하
+
+    def _link_point(self, link_index: int, local: np.ndarray) -> np.ndarray:
+        """링크 프레임의 로컬점 -> 월드 위치. local 이 0 이면 링크 원점."""
+        state = self.p.getLinkState(self.uid, link_index, computeForwardKinematics=True,
+                                    physicsClientId=self.client)
+        if not np.any(local):
+            return np.array(state[4])
+        rot = np.array(self.p.getMatrixFromQuaternion(state[5])).reshape(3, 3)
+        return np.array(state[4]) + rot @ local
+
+    def _measure_tip_axis_offsets(self) -> dict:
+        """손가락별로 realtip 의 fingertip 링크 로컬 오프셋을 재고 축 성분만 남긴다 (영점 자세)."""
+        for i in self.dof_indices:
+            self.p.resetJointState(self.uid, i, 0.0, physicsClientId=self.client)
+        out = {}
+        for f, (tip_link, real_link) in EE_LINKS.items():
+            st = self.p.getLinkState(self.uid, tip_link, computeForwardKinematics=True, physicsClientId=self.client)
+            rot = np.array(self.p.getMatrixFromQuaternion(st[5])).reshape(3, 3)
+            local = rot.T @ (self._link_origin(real_link) - np.array(st[4]))
+            axis = np.zeros(3)
+            k = int(np.argmax(np.abs(local)))      # 지배 성분이 손가락 축 (실측: y, -70 mm)
+            axis[k] = local[k]
+            out[f] = axis
+        return out
 
     def _link_origin(self, link_index: int) -> np.ndarray:
         state = self.p.getLinkState(self.uid, link_index, physicsClientId=self.client)
@@ -430,7 +477,7 @@ class LeapRetargeter:
     _seed = _set_joints   # 다음 프레임 IK 의 시드. 해가 프레임마다 튀는 것을 막는다.
 
     def _ee_positions(self) -> np.ndarray:
-        return np.array([self._link_origin(i) for i in self.ee_links])
+        return np.array([self._link_point(link, local) for _, _, link, local in self.ee_spec])
 
     def _jacobian(self, q: np.ndarray) -> np.ndarray:
         """목표점 8개의 위치 자코비안을 세로로 쌓은 (24, 16) 행렬.
@@ -443,9 +490,9 @@ class LeapRetargeter:
         ql = q.tolist()
         return np.vstack([
             np.array(self.p.calculateJacobian(
-                self.uid, link, [0, 0, 0], ql, zeros, zeros, physicsClientId=self.client
+                self.uid, link, local.tolist(), ql, zeros, zeros, physicsClientId=self.client
             )[0])
-            for link in self.ee_links
+            for _, _, link, local in self.ee_spec
         ])
 
     def finger_residual(self, targets: np.ndarray, q: np.ndarray) -> dict:
@@ -584,7 +631,7 @@ class LeapRetargeter:
     def _create_debug_balls(self) -> None:
         p = self.p
         base = {"index": (1, 0.3, 0.3), "middle": (0.3, 1, 0.3), "ring": (0.3, 0.3, 1), "thumb": (1, 1, 0.3)}
-        colors = [base[f] + (1,) for f, _ in self.ee_spec]
+        colors = [base[f] + (1,) for f, _, _, _ in self.ee_spec]
         for color in colors:
             vis = p.createVisualShape(
                 p.GEOM_SPHERE, radius=0.006, rgbaColor=color,
