@@ -72,6 +72,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="앞마디 목표를 LEAP 말단 마디 길이로 되짚을지, 사람에서 스케일할지")
     ap.add_argument("--dip-weight", type=float, default=0.3,
                     help="앞마디 목표의 가중치. 손끝은 항상 1.0 이다")
+    ap.add_argument("--no-thumb-couple", action="store_true",
+                    help="[--retargeter ours] 엄지 목표를 검지에 묶지 않는다. "
+                         "끄면 사람이 엄지를 붙여도 로봇은 안 붙는다 (비교용)")
     ap.add_argument("--calib-frames", type=int, default=30,
                     help="엄지 정렬 캘리브레이션에 쓸 프레임 수 (0=건너뜀)")
 
@@ -123,8 +126,10 @@ def main() -> int:
             smoothing=args.smoothing,
             max_speed=args.max_speed,
             dip_weight=args.dip_weight,
+            thumb_couple=not args.no_thumb_couple,
         )
-        print("리타겟팅: 직접 구현 (손끝 위치 IK)")
+        print("리타겟팅: 직접 구현 (손끝 위치 IK)"
+              + ("" if not args.no_thumb_couple else "  [엄지 결합 꺼짐]"))
 
     model = mujoco.MjModel.from_xml_path(MJCF_SCENE)
     data = mujoco.MjData(model)

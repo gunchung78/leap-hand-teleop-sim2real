@@ -9,7 +9,7 @@
 IK 는 그 목표를 3.6mm 오차로 정확히 달성한다. **IK 가 아니라 목표가 틀렸다.**
 
 여기서 재는 후보들
-    base   현재. 엄지 목표 = 자기 뿌리 원점 + 자기 배율(1.57)
+    base   엄지 결합을 끈 상태(--no-thumb-couple). 목표 = 자기 뿌리 원점 + 자기 배율
     C      th_axl 을 IK 변수에서 빼고 0 으로 고정.
            th_axl 은 회전축이 엄지 손끝을 거의 지나서 1 rad 당 손끝이 12~22mm 밖에
            안 움직인다(th_cmc 는 135mm). 손끝만 보는 IK 에서는 사실상 자유변수라
@@ -21,6 +21,9 @@ IK 는 그 목표를 3.6mm 오차로 정확히 달성한다. **IK 가 아니라 
            간격은 사람 간격 x 검지 배율. 로봇이 사람보다 1.91배 크니 비례가 맞다.
     A2C    A2 + C
     hybrid 네 손가락은 ours, 엄지 4관절만 dex 것으로 교체
+    now    지금 본 경로에 들어가 있는 코드 (retarget._couple_thumb). A2 와 같아야 한다.
+
+A2 를 채택해 본 경로에 넣었다. 이 스크립트는 그 결정의 근거로 남는다.
 
 엄지와 네 손가락은 자코비안이 분리된다(손가락 손끝은 엄지 관절에 안 달렸다).
 그래서 엄지 목표를 바꿔도 MCP 열이 안 변한다 — 표에서 직접 확인할 수 있다.
@@ -59,7 +62,7 @@ class Exp(LeapRetargeter):
     def compute_targets(self, world):
         t = super().compute_targets(world)
         if "A" not in self.mode:
-            return t
+            return t   # base / C / hybrid / now 는 부모 결과를 그대로 쓴다
         g_h = float(np.linalg.norm(world[4] - world[8]))
         p_if, p_th = t[TIP_IF], t[TIP_TH]
         v = p_th - p_if
@@ -107,7 +110,8 @@ class Exp(LeapRetargeter):
 
 
 def build(mode):
-    r = Exp(mode, gui=False)
+    # 본 경로의 결합은 끈다. 여기서는 후보 로직을 이 파일 안에서 직접 준다.
+    r = Exp(mode, gui=False, thumb_couple=(mode == "now"))
     for w in CALIB:
         r.observe_calibration(w)
     r.finish_calibration()
@@ -125,7 +129,7 @@ print(f"{'모드':<8}{'자세':<12}{'핀치mm':>8}{'엄지잔차':>9}{'검지잔
 print("-" * 92)
 
 import time
-for mode in ["base", "C", "A1", "A2", "A2C", "hybrid"]:
+for mode in ["base", "C", "A1", "A2", "A2C", "hybrid", "now"]:
     r = build("base" if mode == "hybrid" else mode)
     for label, frames in zip(labels, poses):
         r.reset()

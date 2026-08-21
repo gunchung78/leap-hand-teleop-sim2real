@@ -254,7 +254,8 @@ PyBullet 창이 하나 더 뜨고, IK 가 쫓고 있는 **목표점 8개**가 �
 | 손가락이 늘 뻗어 있음 (dex) | 배율 포화. `python scripts/phase1/p1_diag_tune_dex_scale.py` 로 다시 잰다 |
 | 떨림 (dex) | `--dex-alpha 0.1` (기본 0.2, 작을수록 부드럽고 느리다) |
 | 집기가 부정확 (dex) | `--dex-type dexpilot` 인지 확인. `vector` 는 손끝간 거리를 안 본다 |
-| 엄지-검지 핀치가 안 맞음 (ours) | `ours` 의 구조적 한계다. 집기가 급하면 `--retargeter dex` |
+| 엄지-검지 핀치가 안 맞음 (ours) | 엄지 결합이 켜져 있는지 확인. `--no-thumb-couple` 이 붙었으면 뺄 것 |
+| 엄지가 검지 쪽으로 과하게 딸려옴 | 손이 작으면 그렇다. `--no-thumb-couple` 로 끄고 비교 (README 엄지 절) |
 | 주먹이 갈고리처럼 됨 (dex) | `dex` 의 구조적 한계다. 기본값 `ours` 를 쓸 것 |
 | 엄지만 엉뚱함 (ours) | `python scripts/phase1/p1_diag_thumb.py` 로 원인을 가른다 |
 | 떨리는데 재시도가 0 (ours) | `--smoothing 0.2` |
