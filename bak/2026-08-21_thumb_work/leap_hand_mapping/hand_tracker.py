@@ -192,7 +192,7 @@ def draw_landmarks(frame_bgr: np.ndarray, obs: HandObservation) -> np.ndarray:
 #
 # MediaPipe 의 3D 추정은 손이 너무 멀면(작게 찍히면) 거칠어지고, 너무 가까우면 프레임
 # 밖으로 잘린다. 사용자가 매번 "얼마나 가까이 대야 하나" 를 감으로 맞추지 않도록 화면에
-# 틀을 그려 주고, 손이 그 안에 있는지 판정한다. 녹화기(bak/ 의 p1_diag_record_poses.py)는 이 판정을
+# 틀을 그려 주고, 손이 그 안에 있는지 판정한다. 녹화(p1_diag_record_poses.py)는 이 판정을
 # 통과한 프레임만 받고, 텔레오퍼레이션은 틀 밖이면 경고만 한다.
 #
 # 거리의 대리값은 **손목 -> 중지 MCP 의 화면 픽셀 길이**다. 이 길이는 손가락을 굽히든

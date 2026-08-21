@@ -109,8 +109,8 @@ def main() -> int:
     print(f"  LEAP 엄지 도달거리 {rt.reference.reach['thumb'] * 1000:.1f} mm,"
           f" 말단마디 {rt.reference.distal_length['thumb'] * 1000:.1f} mm")
 
-    lo = jm.LIMITS_INTERSECTION_MJ_LOWER
-    hi = jm.LIMITS_INTERSECTION_MJ_UPPER
+    lo = jm.LIMITS_MJ_LOWER
+    hi = jm.LIMITS_MJ_UPPER
     tj = FINGER_JOINTS["thumb"]
 
     print("\n" + "-" * 68)

@@ -13,7 +13,7 @@ IK 는 그 목표를 3.6mm 오차로 정확히 달성한다. **IK 가 아니라 
     C      th_axl 을 IK 변수에서 빼고 0 으로 고정.
            th_axl 은 회전축이 엄지 손끝을 거의 지나서 1 rad 당 손끝이 12~22mm 밖에
            안 움직인다(th_cmc 는 135mm). 손끝만 보는 IK 에서는 사실상 자유변수라
-           한계(-20도)에 붙어 버린다.
+           한계(-27도; 한계표 정정 전에는 -20도)에 붙어 버린다.
     A1     DexPilot 투영. 사람 엄지-검지 간격이 project_dist(30mm) 밑이면 목표 간격을
            0 으로 눌러 "붙여라"로 바꾸고, escape_dist(50mm) 위면 손대지 않는다.
            두 상수는 dex-retargeting 의 leap_hand_right_dexpilot.yml 값 그대로다.
@@ -48,7 +48,14 @@ THJ = [12, 13, 14, 15]
 AXL = 13
 PROJECT, ESCAPE = 0.03, 0.05     # DexPilot 기본값 (dex-retargeting leap dexpilot yml)
 
-cap = np.load(os.path.join(REPO, "thumb_capture.npz"), allow_pickle=True)
+import argparse
+_ap = argparse.ArgumentParser()
+_ap.add_argument("--thumb-mode", default="map", choices=["map", "ik"],
+                 help="LeapRetargeter 의 thumb_mode. 본 경로 기본은 map. ik 는 예전 경로")
+_ap.add_argument("--capture", default=os.path.join(REPO, "thumb_capture.npz"))
+_args = _ap.parse_args()
+
+cap = np.load(_args.capture, allow_pickle=True)
 labels = [str(x) for x in cap["pose_labels"]]
 poses = [np.asarray(cap[f"pose{i}"], float) for i in range(3, 3 + len(labels))]
 CALIB = np.asarray(cap["calib_rest"], float)[:30]
@@ -89,7 +96,7 @@ class Exp(LeapRetargeter):
             return super()._solve_dls(targets, seed)
         q = (self._q if seed is None else np.asarray(seed, float)).copy()
         q[AXL] = 0.0
-        lo, hi = jm.LIMITS_INTERSECTION_MJ_LOWER, jm.LIMITS_INTERSECTION_MJ_UPPER
+        lo, hi = jm.LIMITS_MJ_LOWER, jm.LIMITS_MJ_UPPER
         eye = np.eye(jm.NUM_JOINTS)
         w = self.target_weights
         for _ in range(self.ik_iterations):
@@ -111,7 +118,7 @@ class Exp(LeapRetargeter):
 
 def build(mode):
     # 본 경로의 결합은 끈다. 여기서는 후보 로직을 이 파일 안에서 직접 준다.
-    r = Exp(mode, gui=False, thumb_couple=(mode == "now"))
+    r = Exp(mode, gui=False, thumb_couple=(mode == "now"), thumb_mode=_args.thumb_mode)
     for w in CALIB:
         r.observe_calibration(w)
     r.finish_calibration()
@@ -154,7 +161,20 @@ for mode in ["base", "C", "A1", "A2", "A2C", "hybrid", "now"]:
               f"{np.mean(JT):6.2f}{np.mean(MS):6.1f}")
     r.close()
     print()
+# 사람 쪽 수치는 녹화에서 직접 센다. 예전에는 여기 숫자를 박아 두었는데, 녹화를
+# 다시 만든 뒤 그 숫자가 옛 데이터(오염된 타이머 녹화)의 것으로 남아 표와 어긋났다.
+_gap = [np.linalg.norm(w[:, 4] - w[:, 8], axis=1).mean() * 1000 for w in poses]
+print(f"[thumb_mode={_args.thumb_mode}]  녹화 {os.path.basename(_args.capture)}")
+print("사람 실측 엄지-검지 간격: " + " / ".join(f"{l} {g:.1f}" for l, g in zip(labels, _gap)) + " mm")
+_dexg = []
+for frames in poses:
+    _d = DexRetargeter(hand_type="Right", retargeting_type="dexpilot")
+    _g = []
+    for k, w in enumerate(frames):
+        q = _d.retarget(w, dt=1/30)
+        if k >= 10:
+            fk._set_joints(q); ee = fk._ee_positions()
+            _g.append(np.linalg.norm(ee[TIP_TH] - ee[TIP_IF]) * 1000)
+    _dexg.append(np.mean(_g))
+print("dex(dexpilot) 핀치 간격:  " + " / ".join(f"{l} {g:.1f}" for l, g in zip(labels, _dexg)) + " mm")
 fk.close()
-print("사람 실측 엄지-검지 간격: 편손 73.2 / 엄지붙임 61.8 / 핀치 57.2 / 주먹 29.5 mm")
-print("사람 MCP 굽힘:            편손  9.7 / 엄지붙임 10.7 / 핀치 11.0 / 주먹 60.3 도")
-print("dex(dexpilot) 핀치 간격:  136.9 / 128.5 / 92.9 / 31.6 mm")
