@@ -184,3 +184,87 @@ def draw_landmarks(frame_bgr: np.ndarray, obs: HandObservation) -> np.ndarray:
                     MIDDLE_DIP, MIDDLE_TIP, RING_DIP, RING_TIP)
         cv2.circle(frame_bgr, pt, 6 if key else 3, (0, 0, 255) if key else (255, 160, 0), -1)
     return frame_bgr
+
+
+# ---------------------------------------------------------------------------
+# 손 위치 안내 틀
+# ---------------------------------------------------------------------------
+#
+# MediaPipe 의 3D 추정은 손이 너무 멀면(작게 찍히면) 거칠어지고, 너무 가까우면 프레임
+# 밖으로 잘린다. 사용자가 매번 "얼마나 가까이 대야 하나" 를 감으로 맞추지 않도록 화면에
+# 틀을 그려 주고, 손이 그 안에 있는지 판정한다. 녹화(p1_diag_record_poses.py)는 이 판정을
+# 통과한 프레임만 받고, 텔레오퍼레이션은 틀 밖이면 경고만 한다.
+#
+# 거리의 대리값은 **손목 -> 중지 MCP 의 화면 픽셀 길이**다. 이 길이는 손가락을 굽히든
+# 펴든 거의 변하지 않아서(손등뼈) 자세와 무관하게 거리만 잰다. 프레임 높이 대비 비율로
+# 표현해 해상도에 무관하게 만든다. MediaPipe world 좌표는 손 중심 기준이라 거리 정보가
+# 없다 — 픽셀 크기가 유일한 단서다.
+#
+# 기본값의 뜻 (640x480, 일반 웹캠 수직 화각 ~48도 가정)
+#     hand_min 0.20  손등뼈 96px  ≈ 손이 카메라에서 약 50cm
+#     hand_max 0.34  손등뼈 163px ≈ 약 30cm
+# 이 사이에서 손 전체가 0.5W x 0.8H 상자 안에 들어온다. 카메라가 다르면 --hand-min/max
+# 로 조정한다. 정답은 없고 "매번 같은 거리" 가 목적이다.
+
+
+@dataclass
+class HandGuide:
+    box_w: float = 0.50     # 안내 상자 폭 (프레임 폭 비율)
+    box_h: float = 0.80     # 안내 상자 높이 (프레임 높이 비율)
+    hand_min: float = 0.20  # 손목->중지MCP 픽셀 길이 하한 (프레임 높이 비율). 작으면 너무 멀다
+    hand_max: float = 0.34  # 상한. 크면 너무 가깝다
+
+    def box_px(self, shape) -> tuple[int, int, int, int]:
+        h, w = shape[:2]
+        bw, bh = int(w * self.box_w), int(h * self.box_h)
+        x0, y0 = (w - bw) // 2, (h - bh) // 2
+        return x0, y0, x0 + bw, y0 + bh
+
+    def hand_length_frac(self, obs: HandObservation, shape) -> float:
+        """손목->중지 MCP 픽셀 길이를 프레임 높이로 나눈 값."""
+        h, w = shape[:2]
+        a = obs.image[WRIST][:2] * (w, h)
+        b = obs.image[MIDDLE_MCP][:2] * (w, h)
+        return float(np.linalg.norm(a - b) / h)
+
+    def check(self, obs: HandObservation | None, shape) -> tuple[bool, str, float]:
+        """(틀 안인가, 이유, 손등뼈 비율). 이유는 화면에 그대로 띄우는 짧은 영문."""
+        if obs is None:
+            return False, "no hand", 0.0
+        h, w = shape[:2]
+        x0, y0, x1, y1 = self.box_px(shape)
+        pts = obs.image[:, :2] * (w, h)
+        frac = self.hand_length_frac(obs, shape)
+        if frac < self.hand_min:
+            return False, "too far - come closer", frac
+        if frac > self.hand_max:
+            return False, "too close - back off", frac
+        if (pts[:, 0].min() < x0 or pts[:, 0].max() > x1
+                or pts[:, 1].min() < y0 or pts[:, 1].max() > y1):
+            return False, "move hand inside the box", frac
+        return True, "ok", frac
+
+    def to_array(self) -> np.ndarray:
+        return np.array([self.box_w, self.box_h, self.hand_min, self.hand_max])
+
+
+def draw_guide(frame_bgr: np.ndarray, guide: HandGuide, ok: bool, reason: str,
+               frac: float) -> np.ndarray:
+    """안내 상자와 판정을 그린다. 틀 안이면 초록, 아니면 주황."""
+    import cv2
+
+    x0, y0, x1, y1 = guide.box_px(frame_bgr.shape)
+    color = (0, 200, 0) if ok else (0, 140, 255)
+    cv2.rectangle(frame_bgr, (x0, y0), (x1, y1), color, 2)
+    h = frame_bgr.shape[0]
+    # 거리 게이지: 상자 오른쪽에 세로 막대. 가운데 띠가 허용 범위.
+    gx = x1 + 12
+    cv2.line(frame_bgr, (gx, y0), (gx, y1), (120, 120, 120), 2)
+    lo_y = int(y1 - (y1 - y0) * guide.hand_min / 0.5)
+    hi_y = int(y1 - (y1 - y0) * guide.hand_max / 0.5)
+    cv2.rectangle(frame_bgr, (gx - 4, hi_y), (gx + 4, lo_y), (0, 200, 0), -1)
+    if frac > 0:
+        fy = int(np.clip(y1 - (y1 - y0) * frac / 0.5, y0, y1))
+        cv2.circle(frame_bgr, (gx, fy), 7, color, -1)
+    cv2.putText(frame_bgr, reason, (x0, y1 + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    return frame_bgr
