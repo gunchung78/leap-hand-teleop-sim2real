@@ -63,10 +63,11 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory("leap_teleop"), "launch", "sim.launch.py")),
         launch_arguments={
-            "camera": ParameterValue(lc("camera"), value_type=int), "hand": lc("hand"), "mirror": lc("mirror"),
-            "show": lc("show"), "viewer": lc("viewer"), "max_speed": ParameterValue(lc("max_speed"), value_type=float),
-            "tracker": lc("tracker"), "smoothing": ParameterValue(lc("smoothing"), value_type=float), "deadband": lc("deadband"),
-            "restart_mm": ParameterValue(lc("restart_mm"), value_type=float),
+            # launch_arguments 는 문자열 치환이어야 한다 (타입 고정은 sim.launch 의 Node 쪽에서 한다)
+            "camera": lc("camera"), "hand": lc("hand"), "mirror": lc("mirror"),
+            "show": lc("show"), "viewer": lc("viewer"), "max_speed": lc("max_speed"),
+            "tracker": lc("tracker"), "smoothing": lc("smoothing"), "deadband": lc("deadband"),
+            "restart_mm": lc("restart_mm"),
         }.items(),
         condition=IfCondition(lc("sim")),
     )
