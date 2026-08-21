@@ -325,7 +325,9 @@ ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: true"     # 이걸
 ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: false"    # 그 자리에서 멈춘다
 ```
 
-- enable 하면 브리지가 먼저 실기 현재 자세를 읽고 **거기서부터** 램프한다. 켜자마자 점프하지 않는다.
+- **SPACE** (카메라 창 포커스) = 데드맨 토글. 창 오른쪽 위 `ROBOT ON/OFF`. CLI 로 바꿔도 창에 반영된다.
+- enable 하면 브리지가 먼저 실기 현재 자세를 읽고 **거기서부터** 1 rad/s 로 합류한 뒤 8 rad/s 로 바뀐다.
+  켜자마자 점프하지 않는다. 런치 시 토크가 켜질 때도 현재 자세를 유지한다(`hold_on_start`).
 - 어떤 모터든 |전류| > 300 이면 명령을 그 자리에 얼린다. 손을 빼서 자세를 풀면 자동 해제.
 - 포트가 다르면 `port:=/dev/serial/by-id/...`. `ls /dev/serial/by-id` 로 확인.
 - `curr_lim` 은 350 이다. **올리지 말 것** (Lite 플라스틱 기어).

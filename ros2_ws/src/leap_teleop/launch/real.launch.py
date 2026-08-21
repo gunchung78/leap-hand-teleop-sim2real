@@ -4,6 +4,7 @@
     ros2 launch leap_teleop real.launch.py fake:=true      # 실기 대신 fake_hand_node (배선 시험)
     ros2 launch leap_teleop real.launch.py sim:=false      # MuJoCo 트윈 없이
     ros2 launch leap_teleop real.launch.py tracker:=false  # 카메라 없이 (계단 응답 시험)
+    카메라 창에서 SPACE = 데드맨 토글 (ROBOT ON/OFF). 또는
     ros2 topic pub --once /teleop/enable std_msgs/Bool "data: true"    # 데드맨 ON. 이걸 줘야 움직인다
 
 sim.launch.py 의 세 노드 + hand_bridge_node + leaphand_node(업스트림, 패치본).
@@ -45,6 +46,8 @@ def generate_launch_description():
         DeclareLaunchArgument("curr_lim", default_value="350.0", description="Lite 는 350. 올리지 말 것"),
         DeclareLaunchArgument("max_speed", default_value="8.0"),
         DeclareLaunchArgument("current_warn", default_value="300.0"),
+        DeclareLaunchArgument("engage_speed", default_value="1.0",
+                              description="데드맨 ON 직후 목표에 합류하는 속도 rad/s. 합류 뒤 max_speed"),
         DeclareLaunchArgument("poll_rate", default_value="30.0",
                               description="브리지가 /leap_pos_vel_eff 를 읽는 주기. 읽기 오류가 잦으면 15 로"),
         DeclareLaunchArgument("tracker", default_value="true",
@@ -77,7 +80,7 @@ def generate_launch_description():
     bridge = Node(package="leap_teleop", executable="hand_bridge_node", name="hand_bridge_node",
                   output="screen", emulate_tty=True,
                   parameters=[{"max_speed": lc("max_speed"), "current_warn": lc("current_warn"),
-                               "poll_rate": lc("poll_rate")}])
+                               "poll_rate": lc("poll_rate"), "engage_speed": lc("engage_speed")}])
 
     real = Node(package="leap_hand", executable="leaphand_node.py", name="leaphand_node",
                 output="screen", emulate_tty=True,
