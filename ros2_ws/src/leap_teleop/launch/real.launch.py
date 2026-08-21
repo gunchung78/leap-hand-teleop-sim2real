@@ -45,6 +45,8 @@ def generate_launch_description():
         DeclareLaunchArgument("curr_lim", default_value="350.0", description="Lite 는 350. 올리지 말 것"),
         DeclareLaunchArgument("max_speed", default_value="8.0"),
         DeclareLaunchArgument("current_warn", default_value="300.0"),
+        DeclareLaunchArgument("poll_rate", default_value="30.0",
+                              description="브리지가 /leap_pos_vel_eff 를 읽는 주기. 읽기 오류가 잦으면 15 로"),
         DeclareLaunchArgument("tracker", default_value="true",
                               description="false 면 카메라/리타겟 없이 브리지+실기(+시뮬)만"),
     ]
@@ -74,7 +76,8 @@ def generate_launch_description():
 
     bridge = Node(package="leap_teleop", executable="hand_bridge_node", name="hand_bridge_node",
                   output="screen", emulate_tty=True,
-                  parameters=[{"max_speed": lc("max_speed"), "current_warn": lc("current_warn")}])
+                  parameters=[{"max_speed": lc("max_speed"), "current_warn": lc("current_warn"),
+                               "poll_rate": lc("poll_rate")}])
 
     real = Node(package="leap_hand", executable="leaphand_node.py", name="leaphand_node",
                 output="screen", emulate_tty=True,
