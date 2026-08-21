@@ -27,7 +27,7 @@
 
 파라미터
   smoothing(0.4) max_speed(8.0 rad/s) distal_mode("leap") scale(0.0=자동)
-  hold_timeout(1.5) release_time(1.0) deadband_deg(0.5) restart_mm(1.0) pip_target(false)
+  hold_timeout(1.5) release_time(1.0) deadband_deg(0.5) restart_mm(1.0) pip_target(false) tip_mode(realtip)
 """
 
 from __future__ import annotations
@@ -63,6 +63,8 @@ class RetargetNode(Node):
         self.declare_parameter("restart_mm", 1.0)
         # PIP 관절점을 목표에 추가 (손가락당 3점). 정지 떨림 1.11 -> 0.33도 (녹화 실측). 기본 꺼짐
         self.declare_parameter("pip_target", False)
+        # 손끝점 정의: realtip(패드 접촉점, 축에서 20도 이탈) | axis(손가락 축 위 점). 기본 realtip
+        self.declare_parameter("tip_mode", "realtip")
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.deadband = np.radians(float(p("deadband_deg")))
         self._q_sent = None
@@ -78,6 +80,7 @@ class RetargetNode(Node):
             max_speed=float(p("max_speed")),
             restart_threshold=float(p("restart_mm")) / 1000.0,
             pip_target=bool(p("pip_target")),
+            tip_mode=str(p("tip_mode")),
         )
         self.hold_timeout = float(p("hold_timeout"))
         self.release_time = float(p("release_time"))
@@ -97,7 +100,7 @@ class RetargetNode(Node):
         self.get_logger().info(
             f"{TOPIC_LANDMARKS} -> {TOPIC_JOINT_CMD}  smoothing={p('smoothing')}"
             f" max_speed={p('max_speed')} distal_mode={p('distal_mode')} pip_target={p('pip_target')}"
-            f" 목표점 {len(self.rt.ee_spec)}"
+            f" tip_mode={p('tip_mode')} 목표점 {len(self.rt.ee_spec)}"
         )
 
     def _on_landmarks(self, msg: PointCloud2) -> None:
