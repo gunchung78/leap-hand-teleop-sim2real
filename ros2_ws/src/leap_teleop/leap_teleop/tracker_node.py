@@ -16,6 +16,11 @@ PointCloud2 를 고른 이유
   오른손이 Right 로 안 잡히면 영상이 뒤집힌 것 -> mirror 파라미터. 라벨 필터가 곧
   좌표계 정합 검사다 (leap_hand_mapping.hand_tracker 참고).
 
+데드맨 버튼
+  show=true 일 때 카메라 창에 포커스를 두고 **SPACE** 를 누르면 /teleop/enable 을 토글한다
+  (ON -> 실기가 움직인다, 다시 누르면 OFF -> 그 자리에서 정지). 창 상단에 ROBOT ON/OFF 가
+  크게 뜬다. ros2 topic pub 로 바꾼 상태도 구독해서 같이 보여 준다. q 는 종료.
+
 파라미터
   camera(0) width(640) height(480) hand("Right") mirror(false) model_path(기본 모델)
   show(false)       카메라 창 + 손 위치 틀. 틀 밖이어도 publish 는 한다(경고만)
@@ -31,10 +36,10 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs_py import point_cloud2 as pc2
-from std_msgs.msg import Header
+from std_msgs.msg import Bool, Header
 
 from leap_hand_mapping import hand_tracker as ht
-from leap_teleop import SENSOR_QOS, TOPIC_LANDMARKS
+from leap_teleop import SENSOR_QOS, TOPIC_ENABLE, TOPIC_LANDMARKS
 
 
 class TrackerNode(Node):
@@ -67,6 +72,10 @@ class TrackerNode(Node):
         self.show = bool(p("show"))
 
         self.pub = self.create_publisher(pc2.PointCloud2, TOPIC_LANDMARKS, SENSOR_QOS)
+        # 데드맨 버튼. 브리지가 듣는 토픽에 Bool 을 낸다. 바깥(CLI)에서 바꾼 상태도 같이 본다.
+        self.enabled = False
+        self.pub_enable = self.create_publisher(Bool, TOPIC_ENABLE, 10)
+        self.create_subscription(Bool, TOPIC_ENABLE, self._on_enable, 10)
 
         # 카메라 read() 는 다음 프레임까지 블록한다. 타이머는 그보다 촘촘하게 돌려 두고
         # read() 가 페이스를 정하게 한다. 별도 스레드를 쓰지 않는 이유: 이 노드는 이것
@@ -108,9 +117,16 @@ class TrackerNode(Node):
             status = f"{obs.handedness} {obs.score:.2f}" if obs else "no hand"
             cv2.putText(frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                         (0, 200, 0) if obs else (0, 0, 255), 2)
+            w = frame.shape[1]
+            label = "ROBOT ON" if self.enabled else "ROBOT OFF  (SPACE)"
+            cv2.putText(frame, label, (w - 330, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
+                        (0, 0, 255) if self.enabled else (160, 160, 160), 3)
             cv2.imshow("tracker_node", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
                 raise KeyboardInterrupt
+            if key == ord(" "):
+                self._toggle_enable()
 
         now = time.time()
         if now - self._last_log >= 5.0:
@@ -121,8 +137,18 @@ class TrackerNode(Node):
             )
             self._last_log = now
 
+    def _toggle_enable(self) -> None:
+        self.enabled = not self.enabled
+        self.pub_enable.publish(Bool(data=self.enabled))
+        self.get_logger().info("데드맨 " + ("ON — 실기가 따라간다" if self.enabled else "OFF — 실기 정지"))
+
+    def _on_enable(self, msg: Bool) -> None:
+        self.enabled = bool(msg.data)
+
     def destroy_node(self) -> bool:
         try:
+            if self.enabled:
+                self.pub_enable.publish(Bool(data=False))   # 창을 닫으면 실기도 멈춘다
             self.cap.release()
             self.tracker.close()
             if self.show:

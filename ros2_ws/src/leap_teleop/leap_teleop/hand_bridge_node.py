@@ -9,6 +9,9 @@ LEAP Hand v1 Lite 는 플라스틱 기어(XL330)라 스톨 상태로 밀면 이�
 |           | 떨어지면 그 자리에서 멈춘다(영점으로 튀지 않는다) |
 | 시작 동기 | enable 되면 먼저 /leap_position 으로 실기 현재 자세를 읽어 거기서부터 램프한다.
 |           | 읽기 전에는 명령을 내지 않는다 — 켜자마자 목표로 점프하는 일을 막는다 |
+| 합류 램프 | enable 직후에는 engage_speed(1 rad/s)로 **천천히** 목표에 합류하고, 모든 관절이
+|           | engage_tol 안에 들어온 뒤에야 max_speed 로 바뀐다. 카메라가 이미 다른 자세를 보고
+|           | 있을 때 켜도 실기가 확 움직이지 않는다 |
 | 범위 클립 | jm.clip_mujoco (MJCF ∩ 실기 규약) |
 | 속도 제한 | max_speed rad/s. cmd_rate(60 Hz) 타이머로 목표를 향해 램프 |
 | 전류 동결 | /leap_pos_vel_eff 를 poll_rate(30 Hz) 폴링. |effort| > current_warn(300) 인 모터가
@@ -53,8 +56,13 @@ class HandBridgeNode(Node):
         self.declare_parameter("current_warn", 300.0)
         self.declare_parameter("current_release", 250.0)
         self.declare_parameter("cmd_timeout", 2.0)
+        self.declare_parameter("engage_speed", 1.0)
+        self.declare_parameter("engage_tol", 0.05)
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.max_speed = float(p("max_speed"))
+        self.engage_speed = float(p("engage_speed"))
+        self.engage_tol = float(p("engage_tol"))
+        self.engaged = False         # enable 뒤 목표에 한 번 합류했는가
         self.current_warn = float(p("current_warn"))
         self.current_release = float(p("current_release"))
         self.cmd_timeout = float(p("cmd_timeout"))
@@ -107,7 +115,8 @@ class HandBridgeNode(Node):
         self.enabled = bool(msg.data)
         if self.enabled:
             self.current = None          # 실기 현재 자세부터 다시 동기
-            self.get_logger().info("데드맨 ON — 실기 현재 자세를 읽고 거기서부터 램프한다")
+            self.engaged = False         # 천천히 합류부터
+            self.get_logger().info(f"데드맨 ON — 실기 현재 자세를 읽고 {self.engage_speed:.1f} rad/s 로 합류한다")
         else:
             self.get_logger().info("데드맨 OFF — 그 자리에서 멈춘다")
 
@@ -123,9 +132,13 @@ class HandBridgeNode(Node):
         if self.target_rx is not None and time.time() - self.target_rx > self.cmd_timeout:
             return                         # 명령 시효 지남. 마지막 자세 유지
         dt = 1.0 / 60.0
-        step = np.clip(self.target - self.current, -self.max_speed * dt, self.max_speed * dt)
+        speed = self.max_speed if self.engaged else self.engage_speed
+        step = np.clip(self.target - self.current, -speed * dt, speed * dt)
         self.current = jm.clip_mujoco(self.current + step)
         self._send(self.current)
+        if not self.engaged and np.abs(self.target - self.current).max() < self.engage_tol:
+            self.engaged = True
+            self.get_logger().info(f"합류 완료 — 이제 {self.max_speed:.1f} rad/s 로 따라간다")
 
     def _send(self, q_mujoco: np.ndarray) -> None:
         msg = JointState()
@@ -197,7 +210,7 @@ class HandBridgeNode(Node):
 
         now = time.time()
         if now - self._last_log >= 5.0:
-            state = "OFF" if not self.enabled else ("FROZEN" if self.frozen else "ON")
+            state = "OFF" if not self.enabled else ("FROZEN" if self.frozen else ("ON" if self.engaged else "ENGAGING"))
             self.get_logger().info(f"데드맨 {state}  명령 {self._n_cmd}  동결 {self._n_frozen}회"
                                    + (f"  전류초과 {self.over}" if self.over else ""))
             self._last_log = now

@@ -331,8 +331,8 @@ MediaPipe의 handedness 판정은 입력이 거울상이 아니라고 가정한�
 | `tracker_node` | 웹캠 → MediaPipe 21점 → `/hand/landmarks`. 손 없으면 publish 안 함. `show:=true` 면 카메라 창 + 손 위치 틀 |
 | `retarget_node` | `LeapRetargeter`(7cccfdd 손끝 IK) 호출 → `/leap/joint_cmd`. 손 유실 1.5 s 까지 유지, 그 뒤 1 s 에 걸쳐 영점 |
 | `sim_node` | `/leap/joint_cmd` → MuJoCo `ctrl` → 물리 스텝(60 Hz) → `/sim/joint_states`. qpos 를 직접 넣지 않는다 |
-| `hand_bridge_node` | 실기로 나가는 **유일한 경로.** 데드맨 `/teleop/enable`(기본 false), 시작 시 실기 자세 동기, 클립, 8 rad/s 램프, `|전류| > 300` 이면 명령 동결, `safe_leaphand_command` 변환, `/real/joint_states` 발행 |
-| `leaphand_node.py` | **업스트림 그대로**(+포트 파라미터 패치). 런치에서 `kP 600 / curr_lim 350 / port by-id` 만 넘긴다 |
+| `hand_bridge_node` | 실기로 나가는 **유일한 경로.** 데드맨 `/teleop/enable`(기본 false), 시작 시 실기 자세 동기, ON 직후 1 rad/s 로 **천천히 합류**한 뒤 8 rad/s, 클립, `|전류| > 300` 이면 명령 동결, `safe_leaphand_command` 변환, `/real/joint_states` 발행 |
+| `leaphand_node.py` | **업스트림 그대로**(+패치: 포트 파라미터, 시작 시 **현재 자세 유지** `hold_on_start`). 런치에서 `kP 600 / curr_lim 350 / port by-id` 만 넘긴다 |
 | `fake_hand_node` | 업스트림 인터페이스만 흉내내는 더미. 실기 없이 배선·데드맨·전류 동결 시험 |
 
 `header.stamp` 는 카메라 촬영 시각을 끝까지 전파한다. 어느 노드에서든 `now - stamp` 가 종단 지연이다.
@@ -352,6 +352,16 @@ ros2 launch leap_teleop real.launch.py fake:=true            # + 브리지 + 가
 ros2 launch leap_teleop real.launch.py                       # + 브리지 + 실기
 ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: true"    # 데드맨 ON — 이걸 줘야 움직인다
 ```
+
+**데드맨 버튼:** 카메라 창에 포커스를 두고 **SPACE** 를 누르면 ON/OFF 가 토글되고 창 오른쪽 위에
+`ROBOT ON` / `ROBOT OFF` 가 뜬다. OFF 는 그 자리에서 정지(영점으로 튀지 않는다). 창을 닫아도 OFF 를 보낸다.
+
+**시작할 때 확 움직이지 않게 한 두 가지:**
+1. 업스트림 `leaphand_node` 는 토크를 켜자마자 편 손(π)으로 가서, 손이 굽어 있으면 튀었다.
+   패치 `hold_on_start`(기본 true)가 토크를 켜기 **전에** 현재 자세를 목표로 써 넣어 그 자리를 유지한다.
+2. 데드맨을 켤 때 카메라가 이미 다른 자세를 보고 있으면 8 rad/s 로 달려갔다. 이제 ON 직후에는
+   `engage_speed` 1 rad/s 로 합류하고(`real.launch.py engage_speed:=`), 모든 관절이 목표에 든 뒤에야
+   8 rad/s 로 바뀐다(로그 `합류 완료`).
 
 `conda activate leap-hand` 뒤에 **같은 환경의 `colcon`** 으로 빌드해야 한다. ament_python 은
 colcon 을 돌리는 파이썬을 console_scripts 의 shebang 에 박는다 — `/usr/bin/colcon` 으로 빌드하면
