@@ -306,6 +306,80 @@ MediaPipe의 handedness 판정은 입력이 거울상이 아니라고 가정한�
 
 ---
 
+## Phase 1 — ROS2 통합 (디지털 트윈)
+
+인수인계 문서 7장의 토픽 그래프 그대로다. 단일 스크립트(`p1_3_teleop_mujoco.py`)가 하던 일을
+노드 넷으로 쪼갰고, **명령 토픽 하나(`/leap/joint_cmd`)가 시뮬과 실기를 동시에 먹인다.**
+알고리즘은 전부 `leap_hand_mapping/`(순수 파이썬, `pip install -e .`)에 있고 노드는 토픽만 잇는다.
+
+```
+ [웹캠] -> tracker_node --/hand/landmarks (PointCloud2 21점, stamp=촬영시각)--> retarget_node
+                                                                                  |
+                                          /leap/joint_cmd (JointState, MuJoCo 순서, stamp 전파)
+                                                  |                               |
+                                                  v                               v
+                                              sim_node                    hand_bridge_node (안전 래퍼)
+                                        MuJoCo 디지털 트윈                  데드맨·클립·속도제한·전류동결
+                                                  |                               |
+                                          /sim/joint_states            /cmd_leap --> leaphand_node (업스트림)
+                                                                                  |
+                                                                      /leap_pos_vel_eff --> /real/joint_states
+```
+
+| 노드 | 하는 일 |
+|---|---|
+| `tracker_node` | 웹캠 → MediaPipe 21점 → `/hand/landmarks`. 손 없으면 publish 안 함. `show:=true` 면 카메라 창 + 손 위치 틀 |
+| `retarget_node` | `LeapRetargeter`(7cccfdd 손끝 IK) 호출 → `/leap/joint_cmd`. 손 유실 1.5 s 까지 유지, 그 뒤 1 s 에 걸쳐 영점 |
+| `sim_node` | `/leap/joint_cmd` → MuJoCo `ctrl` → 물리 스텝(60 Hz) → `/sim/joint_states`. qpos 를 직접 넣지 않는다 |
+| `hand_bridge_node` | 실기로 나가는 **유일한 경로.** 데드맨 `/teleop/enable`(기본 false), 시작 시 실기 자세 동기, 클립, 8 rad/s 램프, `|전류| > 300` 이면 명령 동결, `safe_leaphand_command` 변환, `/real/joint_states` 발행 |
+| `leaphand_node.py` | **업스트림 그대로**(+포트 파라미터 패치). 런치에서 `kP 600 / curr_lim 350 / port by-id` 만 넘긴다 |
+| `fake_hand_node` | 업스트림 인터페이스만 흉내내는 더미. 실기 없이 배선·데드맨·전류 동결 시험 |
+
+`header.stamp` 는 카메라 촬영 시각을 끝까지 전파한다. 어느 노드에서든 `now - stamp` 가 종단 지연이다.
+QoS 는 sensor 계열 BEST_EFFORT depth 1 — 밀린 프레임은 쓰레기라 최신 것만 쓴다.
+
+### 빌드와 실행
+
+```bash
+conda activate leap-hand                     # 반드시. ros2 run 은 PATH 의 python3 을 쓴다
+pip install -e .                             # leap_hand_mapping
+pip install empy==3.3.4 lark catkin_pkg colcon-common-extensions   # (최초 1회) 아래 참고
+bash ros2_ws/setup_upstream.sh               # third_party 의 업스트림 leap_hand 복사 + 패치
+cd ros2_ws && source /opt/ros/humble/setup.bash && colcon build --symlink-install && source install/setup.bash
+
+ros2 launch leap_teleop sim.launch.py                        # 카메라 + 리타겟 + MuJoCo (실기 없음)
+ros2 launch leap_teleop real.launch.py fake:=true            # + 브리지 + 가짜 실기 (배선 시험)
+ros2 launch leap_teleop real.launch.py                       # + 브리지 + 실기
+ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: true"    # 데드맨 ON — 이걸 줘야 움직인다
+```
+
+`conda activate leap-hand` 뒤에 **같은 환경의 `colcon`** 으로 빌드해야 한다. ament_python 은
+colcon 을 돌리는 파이썬을 console_scripts 의 shebang 에 박는다 — `/usr/bin/colcon` 으로 빌드하면
+`/usr/bin/python3` 이 박혀 mediapipe/mujoco/우리 코어가 없다. `empy==3.3.4 lark catkin_pkg` 는
+conda 파이썬이 rosidl 코드 생성에 쓰이기 때문에 필요하다(`leap_hand.srv`).
+
+### 측정 (`scripts/phase1/p1_4_teleop_metrics.py`, `p1_5_step_response.py`)
+
+fake 실기 + MuJoCo, 카메라 없이(`tracker:=false`), 스텝 20° — 재현 가능:
+
+| | 지연 | 상승 (10→90%) | 정상상태 오차 |
+|---|---:|---:|---:|
+| 시뮬 (`/sim/joint_states`) | 33 ms | ~17 ms | 평균 1.17° |
+| fake 실기 (`/real/joint_states`) | 66~79 ms | 167 ms | 0° |
+
+- 시뮬 지연 33 ms 는 60 Hz 물리 타이머 + ROS 전송. fake 실기 지연은 브리지 램프(8 rad/s,
+  20° = 44 ms) + 30 Hz 폴링이다.
+- 시뮬에서 **`if_rot`/`mf_rot` 만 정상상태 오차 5.9°** (상승 없음). 영점에서 검지/중지를 20°
+  벌리면 옆 손가락과 충돌한다 — Phase 0 의 벌림 충돌이 트윈에서 그대로 재현된 것이다.
+  `qpos` 를 직접 넣었으면 안 보였을 사실이다.
+- 시뮬-실기(fake) 추종 오차 RMS 2.68°.
+- 라이브 종단 지연(촬영→관절명령)은 손이 보일 때 `p1_4` 로 잰다. 헤드리스 확인에서 촬영→시뮬 반영
+  76 ms, 리타겟 38 ms/frame(7cccfdd 리타겟터 고유 — 매 프레임 재시도 5회).
+
+**실기 전원을 넣은 측정은 아직이다.** 순서는 데드맨 → 관절 하나(`p1_5 --joints if_mcp`) → 전체.
+
+---
+
 ## 구조
 
 ```
@@ -323,7 +397,17 @@ scripts/
     p1_0_fetch_mediapipe_model.sh  MediaPipe 모델 받기
     p1_1_check_hand_tracking.py    웹캠 추적만 확인 (로봇 없이)
     p1_2_test_retarget_roundtrip.py 리타겟팅 왕복 검증 (카메라 없이)
-    p1_3_teleop_mujoco.py          텔레오퍼레이션 본체
+    p1_3_teleop_mujoco.py          텔레오퍼레이션 본체 (단일 스크립트 경로)
+    p1_4_teleop_metrics.py         [ROS2] 라이브 지표: 토픽 Hz, 종단 지연, 시뮬-실기 추종 오차
+    p1_5_step_response.py          [ROS2] 관절별 계단 응답 (카메라 없이)
+ros2_ws/
+  setup_upstream.sh                업스트림 leap_hand(ros2_module) 복사 + 패치 (src/leap_hand 는 git 밖)
+  src/leap_teleop/                 우리 ament_python 패키지 (아래 "Phase 1 — ROS2 통합")
+    leap_teleop/{tracker,retarget,sim,hand_bridge,fake_hand}_node.py
+    launch/{sim,real}.launch.py
+patches/
+  leap_hand_port_param.patch       업스트림에 가한 유일한 변경 (port/baudrate 파라미터, utils 설치)
+pyproject.toml                     leap_hand_mapping 을 pip install -e . 로 (ROS 노드가 import)
 bak/
   2026-08-21_thumb_work/           되돌리기 전 작업 보관본 (아래 참고)
 ```
@@ -355,7 +439,13 @@ pip install "jax[cuda12]" mujoco mujoco-mjx playground pybullet \
             mediapipe opencv-python numpy dynamixel-sdk
 
 bash scripts/phase1/p1_0_fetch_mediapipe_model.sh   # MediaPipe 1.x 는 모델을 패키지에 넣지 않는다
+
+pip install -e .                                             # leap_hand_mapping (ROS 노드가 import)
+pip install empy==3.3.4 lark catkin_pkg colcon-common-extensions   # ROS2 Humble 빌드를 conda 파이썬으로
 ```
+
+ROS2 Humble 은 apt 로 시스템에 깔려 있다(`/opt/ros/humble`, python3.10). conda env 도 3.10 이라
+`rclpy` 가 그대로 import 된다. 워크스페이스 빌드·실행은 위 "Phase 1 — ROS2 통합" 참고.
 
 GPU 확인 (문서 6장 — CPU 빌드가 깔리면 에러 없이 조용히 느려지기만 한다):
 
