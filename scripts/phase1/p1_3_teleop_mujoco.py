@@ -88,6 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--pybullet-gui", action="store_true", help="IK 목표점을 PyBullet 창으로")
     ap.add_argument("--no-viewer", action="store_true", help="MuJoCo 뷰어 끄기")
     ap.add_argument("--no-window", action="store_true", help="카메라 창 끄기")
+    ap.add_argument("--hand-min", type=float, default=ht.HandGuide.hand_min,
+                    help="손 위치 틀: 손등뼈(손목->중지MCP) 픽셀 길이 하한 (프레임 높이 비율)")
+    ap.add_argument("--hand-max", type=float, default=ht.HandGuide.hand_max,
+                    help="손 위치 틀: 상한. 녹화기와 같은 값을 쓸 것")
     ap.add_argument("--release-after", type=float, default=1.5,
                     help="손을 이 시간(초) 이상 놓치면 천천히 영점으로 (0=유지)")
     ap.add_argument("--seconds", type=float, default=0.0, help="지정 시간 뒤 자동 종료")
@@ -110,6 +114,10 @@ def main() -> int:
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
 
     tracker = ht.HandTracker(handedness=args.hand, mirror=args.mirror)
+    # 손 위치 틀. 녹화(p1_diag_record_poses.py)와 같은 틀 안에서 움직여야 같은 조건이다.
+    # MediaPipe 의 3D 추정은 손이 멀면 크기(배율)부터 달라져서, 캘리브레이션 때와 다른
+    # 거리에서 쓰면 손끝 목표가 도달거리 밖으로 나가 잔차가 수십 mm 로 뛴다.
+    guide = ht.HandGuide(hand_min=args.hand_min, hand_max=args.hand_max)
     use_dex = args.retargeter == "dex"
     if use_dex:
         retargeter = DexRetargeter(
@@ -168,29 +176,39 @@ def main() -> int:
         # 근거는 retarget.finish_calibration 주석 참고.
         print(f"\n[엄지 정렬] 손을 **펴서** 카메라에 보여 주세요. {args.calib_frames} 프레임 모읍니다.")
         print("  사람 엄지가 손바닥 대비 놓인 방향은 LEAP 과 크게 다르고 사람마다도 다릅니다.")
-        collected = 0
+        print("  손을 화면의 상자 안에, 오른쪽 게이지 점을 초록 띠 안에 (틀 밖 프레임은 안 받습니다)")
+        collected = rejected = 0
         t_calib = time.time()
-        while collected < args.calib_frames and time.time() - t_calib < 30:
+        while collected < args.calib_frames and time.time() - t_calib < 60:
             ok, frame = cap.read()
             if not ok:
                 continue
             frame = tracker.preprocess(frame)
             obs = tracker.process(frame)
+            in_box, reason, frac = guide.check(obs, frame.shape)
             if obs is not None:
-                retargeter.observe_calibration(obs.world)
-                collected += 1
+                if in_box:
+                    retargeter.observe_calibration(obs.world)
+                    collected += 1
+                else:
+                    rejected += 1
                 if not args.no_window:
                     ht.draw_landmarks(frame, obs)
             if not args.no_window:
+                ht.draw_guide(frame, guide, in_box, reason, frac)
                 cv2.putText(frame, f"calibrating thumb {collected}/{args.calib_frames}",
                             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
                 cv2.imshow("teleop", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         if retargeter.finish_calibration():
-            print(f"  완료. 보정각 {np.degrees(retargeter.thumb_align_angle()):.1f} deg\n")
+            sc = retargeter.frozen_scales or {}
+            print(f"  완료. 보정각 {np.degrees(retargeter.thumb_align_angle()):.1f} deg,"
+                  f" 틀 밖이라 버린 프레임 {rejected}")
+            print("  고정 배율 " + "  ".join(f"{k} {v:.2f}" for k, v in sc.items()) + "\n")
         else:
-            print("  표본이 부족해 건너뜁니다. 엄지 정확도가 떨어집니다.\n")
+            print(f"  표본이 부족해 건너뜁니다 (틀 안 {collected}, 틀 밖 {rejected})."
+                  " 배율이 매 프레임 다시 계산되고 엄지 정확도가 떨어집니다.\n")
 
     print("손을 카메라에 보이면 따라간다. q 또는 Ctrl-C 로 종료.")
     print(f"MuJoCo 시나리오: {os.path.relpath(MJCF_SCENE, REPO)}")
@@ -203,6 +221,9 @@ def main() -> int:
     loop_ms: list[float] = []
     restarts: list[int] = []
     jitter: list[float] = []   # 프레임 사이 관절각 변화. 진짜 지터인지 보는 지표
+    per_finger: list[np.ndarray] = []   # 손끝 4개 잔차 (index, middle, ring, thumb)
+    out_of_box = 0                       # 검출됐지만 틀 밖이었던 프레임
+    hand_frac: list[float] = []          # 손등뼈 픽셀 비율 (거리 대리값)
     start = last_report = time.time()
     prev = start
 
@@ -220,16 +241,21 @@ def main() -> int:
             frame = tracker.preprocess(frame)
             t0 = time.time()
             obs = tracker.process(frame)
+            in_box, reason, frac = guide.check(obs, frame.shape)
 
             if obs is not None:
                 detected += 1
                 lost_since = None
+                if not in_box:
+                    out_of_box += 1
+                hand_frac.append(frac)
                 q_prev = q_cmd
                 q_cmd = retargeter.retarget(obs.world, dt=dt)
                 if use_dex:
                     tip_errors.append(float(np.nanmean(retargeter.tip_error())))
                 else:
                     e = retargeter.tip_error()[1::2]          # 손끝 4개 (index, middle, ring, thumb)
+                    per_finger.append(e.copy())
                     if args.thumb_mode == "map":
                         e = e[:3]   # 엄지는 손끝 목표를 쫓지 않는다(관절각 매핑). 잔차가 뜻이 없다
                     tip_errors.append(float(e.mean()))
@@ -285,6 +311,7 @@ def main() -> int:
                 last_report = now
 
             if not args.no_window:
+                ht.draw_guide(frame, guide, in_box, reason, frac)
                 status = f"{obs.handedness} {obs.score:.2f}" if obs else "no hand"
                 cv2.putText(frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                             (0, 200, 0) if obs else (0, 0, 255), 2)
@@ -324,6 +351,21 @@ def main() -> int:
     elif tip_errors:
         t = np.array(tip_errors) * 1000
         print(f"IK 손끝 잔차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm (앞마디는 보조 목표라 제외)")
+        if per_finger:
+            pf = np.array(per_finger) * 1000
+            med = np.median(pf, axis=0)
+            print(f"  손가락별 잔차 중앙값  검지 {med[0]:.1f}  중지 {med[1]:.1f}  약지 {med[2]:.1f}"
+                  f"  엄지 {med[3]:.1f} mm"
+                  + ("  (엄지는 관절각 매핑이라 참고만)" if args.thumb_mode == "map" else ""))
+            print("  네 손가락이 다 5mm 를 넘으면 배율(거리)이나 거울상 문제다. 한 손가락만 크면 그 손가락의 추적이다.")
+        if not use_dex:
+            sc = retargeter.frozen_scales
+            print("  배율 " + ("고정 " + "  ".join(f"{k} {v:.2f}" for k, v in sc.items())
+                             if sc else "고정 안 됨 (캘리브레이션 실패 — 매 프레임 재계산)"))
+    if detected:
+        hf = np.array(hand_frac)
+        print(f"손 위치 틀: 밖이었던 프레임 {out_of_box}/{detected} ({out_of_box / detected:.0%}),"
+              f" 손등뼈 비율 중앙값 {np.median(hf):.3f} (허용 {guide.hand_min:.2f}~{guide.hand_max:.2f})")
     if jitter:
         j = np.degrees(np.array(jitter))
         print(f"프레임간 관절각 변화 평균 {j.mean():.2f} deg, 95% {np.percentile(j, 95):.2f} deg,"
