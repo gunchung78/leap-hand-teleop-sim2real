@@ -30,6 +30,8 @@ def generate_launch_description():
                               description="리타겟 출력 데드밴드(deg). 정지 떨림 제거. 0=끔"),
         DeclareLaunchArgument("restart_mm", default_value="1.0",
                               description="IK 재시도 임계(mm). 15 면 실제 손에서 재시도 0 (떨림·지연 시험용)"),
+        DeclareLaunchArgument("pip_target", default_value="false",
+                              description="PIP 관절점을 IK 목표에 추가 (손가락당 3점). 정지 떨림 감소"),
         DeclareLaunchArgument("tracker", default_value="true",
                               description="false 면 tracker/retarget 없이 sim_node 만 (계단 응답 등 카메라 없는 시험)"),
     ]
@@ -42,7 +44,8 @@ def generate_launch_description():
         Node(package="leap_teleop", executable="retarget_node", name="retarget_node",
              output="screen", emulate_tty=True, condition=IfCondition(lc("tracker")),
              parameters=[{"smoothing": ParameterValue(lc("smoothing"), value_type=float), "max_speed": ParameterValue(lc("max_speed"), value_type=float),
-                          "deadband_deg": ParameterValue(lc("deadband"), value_type=float), "restart_mm": ParameterValue(lc("restart_mm"), value_type=float)}]),
+                          "deadband_deg": ParameterValue(lc("deadband"), value_type=float), "restart_mm": ParameterValue(lc("restart_mm"), value_type=float),
+                          "pip_target": ParameterValue(lc("pip_target"), value_type=bool)}]),
         Node(package="leap_teleop", executable="sim_node", name="sim_node",
              output="screen", emulate_tty=True,
              parameters=[{"viewer": lc("viewer")}]),
