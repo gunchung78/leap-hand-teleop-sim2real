@@ -151,6 +151,11 @@ def main(args=None) -> None:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        # launch 가 SIGINT 를 보내면 컨텍스트가 먼저 닫혀 spin 이 RCLError 를 던질 수 있다.
+        # 정상 종료 경합이면 삼키고, 살아 있는데 난 예외면 그대로 올린다.
+        if rclpy.ok():
+            raise
     finally:
         node.destroy_node()
         if rclpy.ok():
