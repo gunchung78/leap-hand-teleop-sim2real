@@ -3,6 +3,7 @@
     ros2 launch leap_teleop real.launch.py                 # 실기 (업스트림 leaphand_node)
     ros2 launch leap_teleop real.launch.py fake:=true      # 실기 대신 fake_hand_node (배선 시험)
     ros2 launch leap_teleop real.launch.py sim:=false      # MuJoCo 트윈 없이
+    ros2 launch leap_teleop real.launch.py tracker:=false  # 카메라 없이 (계단 응답 시험)
     ros2 topic pub --once /teleop/enable std_msgs/Bool "data: true"    # 데드맨 ON. 이걸 줘야 움직인다
 
 sim.launch.py 의 세 노드 + hand_bridge_node + leaphand_node(업스트림, 패치본).
@@ -44,6 +45,8 @@ def generate_launch_description():
         DeclareLaunchArgument("curr_lim", default_value="350.0", description="Lite 는 350. 올리지 말 것"),
         DeclareLaunchArgument("max_speed", default_value="8.0"),
         DeclareLaunchArgument("current_warn", default_value="300.0"),
+        DeclareLaunchArgument("tracker", default_value="true",
+                              description="false 면 카메라/리타겟 없이 브리지+실기(+시뮬)만"),
     ]
 
     sim_launch = IncludeLaunchDescription(
@@ -52,19 +55,22 @@ def generate_launch_description():
         launch_arguments={
             "camera": lc("camera"), "hand": lc("hand"), "mirror": lc("mirror"),
             "show": lc("show"), "viewer": lc("viewer"), "max_speed": lc("max_speed"),
+            "tracker": lc("tracker"),
         }.items(),
         condition=IfCondition(lc("sim")),
     )
-    # sim:=false 면 MuJoCo 없이 tracker + retarget 만
-    sim_off = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(get_package_share_directory("leap_teleop"), "launch", "sim.launch.py")),
-        launch_arguments={
-            "camera": lc("camera"), "hand": lc("hand"), "mirror": lc("mirror"),
-            "show": lc("show"), "viewer": "false", "max_speed": lc("max_speed"),
-        }.items(),
-        condition=UnlessCondition(lc("sim")),
-    )
+    # sim:=false 면 MuJoCo 없이 tracker + retarget 만 (tracker:=false 면 그것도 없이)
+    sim_off = [
+        Node(package="leap_teleop", executable="tracker_node", name="tracker_node",
+             output="screen", emulate_tty=True,
+             condition=IfCondition(PythonExpression(["'", lc("sim"), "' == 'false' and '", lc("tracker"), "' == 'true'"])),
+             parameters=[{"camera": lc("camera"), "hand": lc("hand"),
+                          "mirror": lc("mirror"), "show": lc("show")}]),
+        Node(package="leap_teleop", executable="retarget_node", name="retarget_node",
+             output="screen", emulate_tty=True,
+             condition=IfCondition(PythonExpression(["'", lc("sim"), "' == 'false' and '", lc("tracker"), "' == 'true'"])),
+             parameters=[{"max_speed": lc("max_speed")}]),
+    ]
 
     bridge = Node(package="leap_teleop", executable="hand_bridge_node", name="hand_bridge_node",
                   output="screen", emulate_tty=True,
@@ -78,4 +84,4 @@ def generate_launch_description():
     fake = Node(package="leap_teleop", executable="fake_hand_node", name="fake_hand_node",
                 output="screen", emulate_tty=True, condition=IfCondition(lc("fake")))
 
-    return LaunchDescription(args + [sim_launch, sim_off, bridge, real, fake])
+    return LaunchDescription(args + [sim_launch] + sim_off + [bridge, real, fake])

@@ -122,12 +122,14 @@ class RetargetNode(Node):
             self.q[:] = 0.0
             self._last_rx = None     # 영점 도달. 다음 입력까지 조용히
         self.rt.set_pose(self.q)
-        self._publish(self.q, self.get_clock().now().to_msg())
+        self._publish(self.q, self.get_clock().now().to_msg(), frame_id="leap_mujoco/release")
 
-    def _publish(self, q: np.ndarray, stamp) -> None:
+    def _publish(self, q: np.ndarray, stamp, frame_id: str = "leap_mujoco") -> None:
+        # frame_id 로 "추적에서 나온 명령"과 "손 유실 램프(합성)"를 구분한다. 지표 스크립트가
+        # 지연을 잴 때 합성 명령(stamp=now)을 빼기 위해서다.
         msg = JointState()
         msg.header.stamp = stamp
-        msg.header.frame_id = "leap_mujoco"
+        msg.header.frame_id = frame_id
         msg.name = list(jm.MUJOCO_JOINT_NAMES)
         msg.position = [float(v) for v in q]
         self.pub.publish(msg)
@@ -146,6 +148,11 @@ def main(args=None) -> None:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        # launch 가 SIGINT 를 보내면 컨텍스트가 먼저 닫혀 spin 이 RCLError 를 던질 수 있다.
+        # 정상 종료 경합이면 삼키고, 살아 있는데 난 예외면 그대로 올린다.
+        if rclpy.ok():
+            raise
     finally:
         node.destroy_node()
         if rclpy.ok():
