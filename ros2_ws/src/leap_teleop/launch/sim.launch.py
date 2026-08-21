@@ -25,6 +25,8 @@ def generate_launch_description():
         DeclareLaunchArgument("viewer", default_value="true", description="MuJoCo 뷰어"),
         DeclareLaunchArgument("smoothing", default_value="0.4"),
         DeclareLaunchArgument("max_speed", default_value="8.0"),
+        DeclareLaunchArgument("deadband", default_value="0.5",
+                              description="리타겟 출력 데드밴드(deg). 정지 떨림 제거. 0=끔"),
         DeclareLaunchArgument("tracker", default_value="true",
                               description="false 면 tracker/retarget 없이 sim_node 만 (계단 응답 등 카메라 없는 시험)"),
     ]
@@ -36,7 +38,8 @@ def generate_launch_description():
                           "mirror": lc("mirror"), "show": lc("show")}]),
         Node(package="leap_teleop", executable="retarget_node", name="retarget_node",
              output="screen", emulate_tty=True, condition=IfCondition(lc("tracker")),
-             parameters=[{"smoothing": lc("smoothing"), "max_speed": lc("max_speed")}]),
+             parameters=[{"smoothing": lc("smoothing"), "max_speed": lc("max_speed"),
+                          "deadband_deg": lc("deadband")}]),
         Node(package="leap_teleop", executable="sim_node", name="sim_node",
              output="screen", emulate_tty=True,
              parameters=[{"viewer": lc("viewer")}]),
