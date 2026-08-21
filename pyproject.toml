@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leap-hand-mapping"
+version = "0.1.0"
+description = "LEAP Hand v1 Lite: joint mapping, MediaPipe tracking, fingertip IK retargeting (pure python core, ROS-agnostic)"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
+# mediapipe / opencv / pybullet / mujoco 는 환경 구성(README) 에서 conda env 에 직접 넣는다.
+# 여기에 고정하지 않는 이유: ROS2 Humble 의 시스템 python 과 conda env 가 같은 코어를
+# import 해야 하고, 무거운 의존성을 pip 가 자동으로 끌어오면 두 환경이 갈린다.
+
+[tool.setuptools]
+packages = ["leap_hand_mapping"]

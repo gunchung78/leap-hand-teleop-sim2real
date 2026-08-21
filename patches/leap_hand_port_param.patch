@@ -1,0 +1,57 @@
+diff -ruN a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt	2026-08-21 14:53:25.620970669 +0900
++++ b/CMakeLists.txt	2026-08-21 14:53:44.460795786 +0900
+@@ -36,6 +36,12 @@
+   DESTINATION lib/${PROJECT_NAME}
+ )
+ 
++# leaphand_node.py imports leap_hand_utils from its own directory; install it next to the script
++# so `ros2 run leap_hand leaphand_node.py` works from the install space.
++install(DIRECTORY scripts/leap_hand_utils
++  DESTINATION lib/${PROJECT_NAME}
++)
++
+ # Install launch files
+ install(DIRECTORY launch/
+   DESTINATION share/${PROJECT_NAME}/launch
+diff -ruN a/scripts/leaphand_node.py b/scripts/leaphand_node.py
+--- a/scripts/leaphand_node.py	2026-08-21 14:53:25.620970669 +0900
++++ b/scripts/leaphand_node.py	2026-08-21 14:53:44.460795786 +0900
+@@ -29,6 +29,10 @@
+         self.kI = self.declare_parameter('kI', 0.0).get_parameter_value().double_value
+         self.kD = self.declare_parameter('kD', 200.0).get_parameter_value().double_value
+         self.curr_lim = self.declare_parameter('curr_lim', 350.0).get_parameter_value().double_value
++        # Serial port as a parameter. Empty string keeps the upstream auto-search (ttyUSB0/1/2).
++        # Use /dev/serial/by-id/... so the hand is found regardless of enumeration order.
++        self.port = self.declare_parameter('port', '').get_parameter_value().string_value
++        self.baudrate = self.declare_parameter('baudrate', 4000000).get_parameter_value().integer_value
+         self.ema_amount = 0.2
+         self.prev_pos = self.pos = self.curr_pos = lhu.allegro_to_LEAPhand(np.zeros(16))
+ 
+@@ -47,16 +51,20 @@
+         # For example ls /dev/serial/by-id/* to find your LEAP Hand. Then use the result.  
+         # For example: /dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT7W91VW-if00-port0
+         self.motors = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+-        try:
+-            self.dxl_client = DynamixelClient(self.motors, '/dev/ttyUSB0', 4000000)
++        if self.port:
++            self.dxl_client = DynamixelClient(self.motors, self.port, self.baudrate)
+             self.dxl_client.connect()
+-        except Exception:
++        else:
+             try:
+-                self.dxl_client = DynamixelClient(self.motors, '/dev/ttyUSB1', 4000000)
++                self.dxl_client = DynamixelClient(self.motors, '/dev/ttyUSB0', self.baudrate)
+                 self.dxl_client.connect()
+             except Exception:
+-                self.dxl_client = DynamixelClient(self.motors, '/dev/ttyUSB2', 4000000)
+-                self.dxl_client.connect()
++                try:
++                    self.dxl_client = DynamixelClient(self.motors, '/dev/ttyUSB1', self.baudrate)
++                    self.dxl_client.connect()
++                except Exception:
++                    self.dxl_client = DynamixelClient(self.motors, '/dev/ttyUSB2', self.baudrate)
++                    self.dxl_client.connect()
+ 
+         # Enables position-current control mode and the default parameters
+         self.dxl_client.sync_write(self.motors, np.ones(len(self.motors)) * 5, 11, 1)
