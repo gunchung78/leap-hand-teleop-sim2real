@@ -95,6 +95,11 @@ EE_LANDMARKS = {
 
 FINGERS = ["index", "middle", "ring", "thumb"]
 
+# compute_targets 가 내놓는 목표 8개는 FINGERS 순서로 (앞마디, 손끝) 쌍이다.
+T_INDEX_TIP = 1
+T_THUMB_DIP = 6
+T_THUMB_TIP = 7
+
 # LEAP 의 '접는 방향'을 재는 굽힘각(rad). th_mcp / th_ipl 에 같이 준다.
 # 1.0 근처에서 손끝이 손바닥 평면 안을 손가락 쪽으로 쓸며 대립 자세가 된다.
 THUMB_FOLD_PROBE = 1.0
@@ -209,6 +214,9 @@ class LeapRetargeter:
         dip_weight: float = 0.3,
         smoothing: float = 0.4,
         max_speed: float = 8.0,
+        thumb_couple: bool = True,
+        project_dist: float = 0.03,
+        escape_dist: float = 0.05,
     ) -> None:
         import pybullet as p
 
@@ -236,6 +244,11 @@ class LeapRetargeter:
         self.dip_weight = dip_weight
         self.smoothing = smoothing
         self.max_speed = max_speed
+        # 엄지 목표를 검지 목표에 묶는다. _couple_thumb 참고.
+        # project/escape 는 dex-retargeting 의 leap_hand_right_dexpilot.yml 값 그대로다.
+        self.thumb_couple = thumb_couple
+        self.project_dist = project_dist
+        self.escape_dist = escape_dist
 
         # 계산용 클라이언트는 항상 DIRECT 다.
         #
@@ -471,7 +484,90 @@ class LeapRetargeter:
                 dip = tip - ref.rotation @ (s_f * d)
             targets.append(dip)
             targets.append(tip)
-        return np.array(targets)
+
+        targets = np.array(targets)
+        if self.thumb_couple:
+            targets = self._couple_thumb(targets, world, scales, gain)
+        return targets
+
+    def _couple_thumb(self, targets: np.ndarray, world: np.ndarray,
+                      scales: dict, gain: float) -> np.ndarray:
+        """엄지 목표를 **검지 목표 기준 상대**로 다시 놓는다.
+
+        왜 필요한가
+        ----------
+        위 루프는 손가락마다 자기 뿌리를 원점으로 자기 배율로 목표를 만든다. 검지
+        1.91, 엄지 1.57 로 배율이 서로 다르고 손가락끼리 묶는 항이 없다. 그래서 두
+        손끝 사이 거리는 그 두 벡터의 **차**가 되어 배율이 3.5~4.0배로 증폭된다.
+        실측하면 사용자가 엄지를 검지에 붙이는 동안:
+
+            사람 엄지-검지 간격      57.2 mm
+            로봇에 준 목표 간격     149.0 mm
+            로봇이 만든 간격        147.8 mm   엄지 잔차 3.6mm
+
+        IK 는 목표를 정확히 달성한다. **IK 가 아니라 목표가 틀렸다.** 목표 집합에
+        "엄지와 검지가 만난다"는 조건 자체가 없어서, 잔차를 아무리 낮춰도 안 고쳐진다.
+
+        무엇을 하는가
+        ------------
+        엄지 손끝 목표의 **방향은 그대로 두고 검지 손끝 목표로부터의 거리만** 다시
+        정한다. 거리 정책은 DexPilot 을 그대로 따른다.
+
+            사람 간격 <= project_dist(30mm)   목표 간격 0. "붙여라"
+            사람 간격 >= escape_dist(50mm)    사람 간격 x 검지 배율. 비례
+            그 사이                           둘 사이를 선형 보간
+
+        두 상수는 dex-retargeting 의 leap_hand_right_dexpilot.yml 값이다. 자체
+        기준으로 바꾸지 않는다. 앞마디(IP) 목표는 손끝과 같은 양만큼 평행이동해서
+        엄지 말단 마디 방향을 보존한다.
+
+        무엇을 잃지 않는가
+        ----------------
+        엄지 관절과 네 손가락 손끝은 자코비안이 분리돼 있다(손가락 손끝은 엄지
+        관절에 안 달렸다). 그래서 이 변경은 네 손가락 자세에 **영향이 없다**.
+        실측에서도 주먹 MCP 가 58.1도로 그대로였다.
+
+        실측 (엄지-검지 간격 mm, 편손/엄지붙임/핀치/주먹)
+
+            사람             73.2 /  61.8 /  57.2 /  29.5
+            끄면 (base)     242.3 / 227.1 / 147.8 / 105.5
+            켜면 (이 코드)   141.3 / 124.2 /  99.0 /  54.2
+
+        편 손 242 -> 141mm 는 오차가 아니라 비례다. 로봇이 사람보다 1.91배 크다.
+
+        곁다리 효과: th_axl 은 회전축이 엄지 손끝을 거의 지나서 1 rad 당 손끝이
+        12~22mm 밖에 안 움직인다(th_cmc 는 135mm). 손끝만 보는 IK 에서 사실상
+        자유변수라 목표가 엉뚱하면 관절 한계(-20도)에 붙어 버렸다. 목표가 제대로
+        서면 스스로 +30도까지 쓰기 시작한다. th_axl 을 따로 고정할 필요가 없다.
+
+        재현: scripts/phase1/p1_diag_thumb_options.py
+
+        남은 결함
+        --------
+        주먹에서 54.2mm 에 멈춘다(목표 0, 엄지 잔차 52mm). 이쪽 주먹은 MCP 를 58도
+        접어서 검지 끝이 손바닥 깊숙이 들어가는데 엄지가 거기까지 못 간다. 다만
+        사람도 주먹에서는 엄지가 손가락 바깥을 감싸지 손끝에 닿지 않으므로(실측
+        29.5mm) 애초에 목표를 0 으로 미는 것이 맞는지부터 볼 문제다.
+        """
+        g_h = float(np.linalg.norm(world[ht.THUMB_TIP] - world[ht.INDEX_TIP]))
+        v = targets[T_THUMB_TIP] - targets[T_INDEX_TIP]
+        g0 = float(np.linalg.norm(v))
+        if g0 < 1e-9:
+            return targets
+
+        far = g_h * scales["index"] * gain
+        if g_h <= self.project_dist:
+            g_new = 0.0
+        elif g_h >= self.escape_dist:
+            g_new = far
+        else:
+            g_new = (g_h - self.project_dist) / (self.escape_dist - self.project_dist) * far
+
+        shift = (targets[T_INDEX_TIP] + v / g0 * g_new) - targets[T_THUMB_TIP]
+        targets = targets.copy()
+        targets[T_THUMB_TIP] += shift
+        targets[T_THUMB_DIP] += shift
+        return targets
 
     # 왜 엄지만 안 맞는가 (실측 결론)
     # ------------------------------
@@ -481,6 +577,8 @@ class LeapRetargeter:
     #     사람 엄지-검지 손끝 간격 (배율 적용)   102.9mm
     #     LEAP 이 실제로 만든 간격              150.0mm
     #     LEAP 이 낼 수 있는 최소 간격            0.3mm   <- 할 수 있는데 안 한다
+    #
+    # (아래 "어떻게 고쳤나" 를 볼 것. 이 절은 원인 기록으로 남긴다.)
     #
     # 이 방식은 손가락마다 **자기 뿌리를 원점으로, 자기 길이 배율로** 목표를 만든다.
     # 손가락끼리 아무 연결이 없다. 배율도 서로 다르다(실측: 검지 1.91, 엄지 1.57).
@@ -498,11 +596,17 @@ class LeapRetargeter:
     # 평균, 최소 129mm). 센서를 바꿔도 이 값은 안 변한다. MediaPipe 의 z 추정 노이즈는
     # **떨림**의 원인이지 **안 닿음**의 원인이 아니다. scripts/phase1/p1_diag_compare_retargeters.py.
     #
-    # 여기에 손끝 쌍 거리 목표를 직접 넣지 않는다
-    # ----------------------------------------
-    # 넣으면 DexPilot 재구현이다. 이미 pip 로 설치되고, 저자가 LEAP 설정을 배포하고,
-    # 실측에서 더 잘 되고(핀치 30mm vs 85mm) 더 빠르다(3.7 vs 6.5 ms). 이 파일은
-    # `--retargeter ours` 로 남아 그 비교의 대조군 역할만 한다. 기본은 dex 다.
+    # 어떻게 고쳤나 (2026-08)
+    # ---------------------
+    # 위 진단이 가리키는 대로 목표를 고쳤다. _couple_thumb 를 볼 것. 엄지 손끝 목표를
+    # 검지 손끝 목표 기준 상대로 놓고, 거리 정책은 DexPilot 의 project/escape 를 그대로
+    # 쓴다. 핀치 147.8 -> 99.0mm, 편 손 242.3 -> 141.3mm. 네 손가락 자세는 자코비안이
+    # 분리돼 있어 영향이 없다(주먹 MCP 58.1도 그대로).
+    #
+    # 이것은 DexPilot 재구현이 아니다. 손끝 6쌍 거리를 목표 함수에 넣고 nlopt 로 푸는
+    # 것이 DexPilot 이고, 여기서는 **엄지 목표점 하나를 옮길 뿐** IK 자체는 그대로다.
+    # 손끝 쌍 거리를 제대로 다루고 싶으면 `--retargeter dex` 를 쓰는 편이 낫다.
+    # 대신 그쪽은 MCP 굽힘을 통째로 버린다(README "그 자가 놓친 축 — 자세 충실도").
 
     def observe_calibration(self, world: np.ndarray, phase: str = "rest") -> None:
         """엄지 정렬용 표본을 모은다.

@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 from leap_hand_mapping import joint_map as jm  # noqa: E402
 from leap_hand_mapping.retarget import (  # noqa: E402
+    T_THUMB_TIP as R_T_THUMB_TIP,
     EE_LINKS,
     FINGERS,
     MCP_LINKS,
@@ -85,7 +86,8 @@ def middle_joint(root: np.ndarray, end: np.ndarray, total: float,
     return root + along * u_hat + height * perp
 
 
-def fake_human_landmarks(rt: LeapRetargeter, q: np.ndarray, rng) -> np.ndarray:
+def fake_human_landmarks(rt: LeapRetargeter, q: np.ndarray, rng,
+                         palm_width: float = HUMAN_PALM_WIDTH) -> np.ndarray:
     """자세 q 의 LEAP 에서 MediaPipe 배치의 가짜 사람 랜드마크 21개를 만든다."""
     p = rt.p
     for i, joint in enumerate(rt.dof_indices):
@@ -129,7 +131,7 @@ def fake_human_landmarks(rt: LeapRetargeter, q: np.ndarray, rng) -> np.ndarray:
     lm[ht.THUMB_TIP] = tip["thumb"]
 
     # 사람 손 크기로 축소 + 임의 강체변환. 리타겟터가 전부 상쇄해야 한다.
-    scale = HUMAN_PALM_WIDTH / ref.palm_width
+    scale = palm_width / ref.palm_width
     lm = scale * lm
 
     axis = rng.normal(size=3)
@@ -154,7 +156,13 @@ def main() -> int:
     rng = np.random.default_rng(args.seed)
 
     # 평활화/속도제한은 시간축 필터라 1회 변환 정확도를 가린다. 여기서는 끈다.
-    rt = LeapRetargeter(smoothing=1.0, max_speed=1e9, distal_mode="leap")
+    #
+    # 엄지 결합(_couple_thumb)도 끈다. 이 시험은 **배율이 상쇄되는가**를 보는데,
+    # 결합의 project_dist/escape_dist 는 절대 길이(30/50mm)라 정의상 상쇄되지 않는다.
+    # 켜 두면 여기서 재는 것이 좌표계 정합성이 아니라 가짜 손 크기가 되어 버린다.
+    # 결합의 크기 민감도는 아래 hand_size_sensitivity 에서 따로 잰다.
+    rt = LeapRetargeter(smoothing=1.0, max_speed=1e9, distal_mode="leap",
+                        thumb_couple=False)
 
     lo = jm.LIMITS_INTERSECTION_MJ_LOWER
     hi = jm.LIMITS_INTERSECTION_MJ_UPPER
@@ -198,7 +206,50 @@ def main() -> int:
     print()
     print("판정:", "통과 — 좌표 변환과 IK 가 일관적이다" if ok
           else "실패 — 손끝 잔차가 크다. 좌표계 구성을 의심할 것")
+
+    hand_size_sensitivity(args, rng)
     return 0 if ok else 1
+
+
+def hand_size_sensitivity(args, rng) -> None:
+    """엄지 결합이 사람 손 크기에 얼마나 민감한지 잰다.
+
+    나머지 파이프라인은 배율을 스스로 재서 상쇄한다. 그런데 엄지 결합의
+    project_dist(30mm)/escape_dist(50mm)는 **절대 길이**라 상쇄되지 않는다.
+    손이 작으면 벌린 자세도 "붙이려는 중"으로 읽혀 엄지가 검지 쪽으로 딸려 간다.
+
+    두 상수는 DexPilot(dex-retargeting leap_hand_right_dexpilot.yml) 값 그대로다.
+    upstream 도 실제 MediaPipe 랜드마크(진짜 미터)에 같은 절대값을 쓴다. 그래서
+    바꾸지 않고, 대신 얼마나 흔들리는지를 여기에 기록해 둔다.
+
+    '엄지 목표 이동'은 결합이 엄지 손끝 목표를 원래 자리에서 얼마나 옮겼는지다.
+    0 이면 결합이 아무것도 안 한 것이고, 크면 크게 끌어당긴 것이다.
+    """
+    print()
+    print("엄지 결합의 손 크기 민감도")
+    print("  가짜 손을 여러 크기로 만들어 결합이 목표를 얼마나 옮기는지 본다.")
+    print(f"  {'손바닥폭mm':>10}{'엄지목표이동mm':>15}{'손끝잔차mm':>12}")
+
+    rt = LeapRetargeter(smoothing=1.0, max_speed=1e9, distal_mode="leap")
+    lo, hi = jm.LIMITS_INTERSECTION_MJ_LOWER, jm.LIMITS_INTERSECTION_MJ_UPPER
+    mid = 0.5 * (lo + hi)
+    for pw in (0.030, 0.040, 0.050, 0.060, 0.070):
+        shift, resid = [], []
+        for _ in range(max(10, args.trials // 5)):
+            span = args.amplitude * 0.5 * (hi - lo)
+            q = np.clip(mid + rng.uniform(-1, 1, size=jm.NUM_JOINTS) * span, lo, hi)
+            lm = fake_human_landmarks(rt, q, rng, palm_width=pw)
+            rt.thumb_couple = False
+            base = rt.compute_targets(lm)
+            rt.thumb_couple = True
+            with_c = rt.compute_targets(lm)
+            shift.append(np.linalg.norm(with_c[R_T_THUMB_TIP] - base[R_T_THUMB_TIP]))
+            rt.reset()
+            rt.retarget(lm)
+            resid.append(rt.tip_error()[1::2].mean())
+        print(f"  {pw*1000:10.0f}{np.mean(shift)*1000:15.1f}{np.mean(resid)*1000:12.2f}")
+    rt.close()
+    print("  실제 사람 손바닥 폭은 실측 49.5mm 였다 (thumb_capture.npz).")
 
 
 if __name__ == "__main__":
