@@ -30,6 +30,8 @@ from rclpy.time import Time
 from sensor_msgs.msg import JointState, PointCloud2
 
 QOS = QoSProfile(depth=1, reliability=QoSReliabilityPolicy.BEST_EFFORT)
+JOINT_NAMES = ["if_mcp", "if_rot", "if_pip", "if_dip", "mf_mcp", "mf_rot", "mf_pip", "mf_dip",
+               "rf_mcp", "rf_rot", "rf_pip", "rf_dip", "th_cmc", "th_axl", "th_mcp", "th_ipl"]
 TOPICS = {
     "/hand/landmarks": PointCloud2,
     "/leap/joint_cmd": JointState,
@@ -45,6 +47,8 @@ class Metrics(Node):
         self.lat = {t: [] for t in TOPICS}       # now - stamp (ms)
         self.sim = []                             # (t, q)
         self.real = []
+        self.cmd = []                             # (t, q) 관절 명령
+        self.lm = []                              # (t, 21x3) 랜드마크
         self.release = 0
         for t, typ in TOPICS.items():
             self.create_subscription(typ, t, lambda m, t=t: self._on(t, m), QOS)
@@ -60,6 +64,13 @@ class Metrics(Node):
             self.sim.append((now.nanoseconds * 1e-9, np.array(msg.position)))
         elif topic == "/real/joint_states":
             self.real.append((now.nanoseconds * 1e-9, np.array(msg.position)))
+        elif topic == "/leap/joint_cmd":
+            self.cmd.append((now.nanoseconds * 1e-9, np.array(msg.position)))
+        elif topic == "/hand/landmarks":
+            from sensor_msgs_py import point_cloud2 as pc2
+            pts = pc2.read_points_numpy(msg, field_names=("x", "y", "z"))
+            if pts.shape == (21, 3):
+                self.lm.append((now.nanoseconds * 1e-9, pts.astype(float)))
 
 
 def main() -> int:
@@ -111,6 +122,35 @@ def main() -> int:
             print("  관절별: " + " ".join(f"{v:.1f}" for v in rms))
     else:
         print("\n시뮬-실기 추종 오차: /sim 또는 /real 이 없어 생략")
+
+    # ---- 떨림: 어디서 떨리는가 ----
+    # 마지막 2초 창에서 (a) 랜드마크, (b) 관절 명령, (c) 실기 위치의 프레임간 변화와 표준편차를 잰다.
+    # 손을 가만히 들고 재면: 명령이 떨리면 리타겟/센서 쪽, 명령은 조용한데 실기가 떨리면 모터(PID) 쪽.
+    def jitter(series, label, scale=1.0, unit="deg", names=None):
+        if len(series) < 10:
+            print(f"  {label}: 표본 부족 ({len(series)})")
+            return
+        t_end = series[-1][0]
+        win = [q for t, q in series if t >= t_end - 2.0]
+        if len(win) < 5:
+            print(f"  {label}: 마지막 2초 표본 부족 ({len(win)})")
+            return
+        a = np.array(win) * scale
+        d = np.abs(np.diff(a, axis=0))
+        sd = a.std(axis=0)
+        worst = np.argsort(sd)[::-1][:4]
+        wtxt = "  ".join(f"{names[i] if names else i}:{sd[i]:.2f}" for i in worst)
+        print(f"  {label:<14} 표본 {len(win):3d}  프레임간 변화 평균 {d.max(axis=1).mean():.2f} {unit}"
+              f"  표준편차 평균 {sd.mean():.2f} {unit}  가장 떠는 관절 {wtxt}")
+    print("\n정지 떨림 (마지막 2초 창 — 손을 가만히 든 채 끝내면 의미가 있다)")
+    jitter([(t, q) for t, q in node.cmd], "관절 명령", np.degrees(1.0), "deg", JOINT_NAMES)
+    jitter([(t, q) for t, q in node.real], "실기 위치", np.degrees(1.0), "deg", JOINT_NAMES)
+    jitter([(t, q) for t, q in node.sim], "시뮬 위치", np.degrees(1.0), "deg", JOINT_NAMES)
+    if node.lm:
+        gap = [(t, np.array([np.linalg.norm(p[4] - p[8]) * 1000])) for t, p in node.lm]
+        jitter(gap, "랜드마크 간격", 1.0, "mm")
+    print("  읽는 법: 명령이 0.5도 밑인데 실기가 떨면 모터 PID(kP:=400). 명령이 떨면 smoothing:=0.2 deadband:=1.0,"
+          " 랜드마크가 떨면 거리/조명(틀 안에서).")
 
     lm = node.lat["/hand/landmarks"]; cmd = node.lat["/leap/joint_cmd"]
     if lm and cmd:
