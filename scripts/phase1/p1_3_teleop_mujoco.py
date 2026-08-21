@@ -8,10 +8,10 @@
 
 사용법
 ------
-    python scripts/phase1/p1_1_check_hand_tracking.py     # 먼저 추적부터 확인
-    python scripts/phase1/p1_3_teleop_mujoco.py           # 시뮬만
-    python scripts/phase1/p1_3_teleop_mujoco.py --pybullet-gui   # IK 목표점까지 같이 본다
-    python scripts/phase1/p1_3_teleop_mujoco.py --real           # 실기까지
+    python scripts/check_hand_tracking.py     # 먼저 추적부터 확인
+    python scripts/teleop_mujoco.py           # 시뮬만
+    python scripts/teleop_mujoco.py --pybullet-gui   # IK 목표점까지 같이 본다
+    python scripts/teleop_mujoco.py --real           # 실기까지
 
 손이 안 잡히면 로봇은 **직전 자세를 유지**한다. 영점으로 튀지 않는다.
 사람이 프레임 밖으로 나갈 때마다 손이 확 펴지면 물건을 놓치기 때문이다.
@@ -39,7 +39,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 from leap_hand_mapping import joint_map as jm  # noqa: E402
 from leap_hand_mapping.retarget import LeapRetargeter  # noqa: E402
-from leap_hand_mapping.retarget_dex import DexRetargeter  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MJCF_SCENE = os.path.join(REPO, "third_party/mujoco_menagerie/leap_hand/scene_right.xml")
@@ -54,32 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--mirror", action="store_true",
                     help="영상 좌우 반전. 오른손이 Right 로 안 잡히면 켤 것")
 
-    ap.add_argument("--retargeter", default="ours", choices=["ours", "dex"],
-                    help="직접 구현한 손끝 위치 IK(기본) 또는 dex-retargeting(비교용)")
-    ap.add_argument("--dex-type", default="dexpilot", choices=["dexpilot", "vector"],
-                    help="dexpilot 은 손끝끼리의 거리까지 목표에 넣는다 (집기에 유리)")
-    ap.add_argument("--dex-scale", type=float, default=None,
-                    help="dex-retargeting 의 scaling_factor 덮어쓰기 (기본 1.6, upstream 값)")
-    ap.add_argument("--dex-alpha", type=float, default=None,
-                    help="dex-retargeting low-pass 계수 덮어쓰기 (기본 0.2, 작을수록 부드럽다)")
-
     ap.add_argument("--scale", type=float, default=None,
-                    help="[--retargeter ours] 자동 배율에 곱하는 배수")
+                    help="사람->로봇 스케일 고정. 기본은 손바닥 폭 비율로 매 프레임 자동")
     ap.add_argument("--smoothing", type=float, default=0.4,
                     help="지수 평활 계수. 1이면 평활 없음, 작을수록 부드럽고 느리다")
     ap.add_argument("--max-speed", type=float, default=8.0, help="관절 속도 상한 (rad/s)")
     ap.add_argument("--distal-mode", default="leap", choices=["leap", "scaled"],
-                    help="앞마디 목표를 LEAP 말단 마디 길이로 되짚을지, 사람에서 스케일할지")
-    ap.add_argument("--dip-weight", type=float, default=0.3,
-                    help="앞마디 목표의 가중치. 손끝은 항상 1.0 이다")
-    ap.add_argument("--thumb-mode", default="map", choices=["map", "ik"],
-                    help="[--retargeter ours] map: 엄지 모양은 관절각 매핑, 핀치만 IK (기본). "
-                         "ik: 엄지도 손끝 위치 IK (예전 동작, 비교용)")
-    ap.add_argument("--no-thumb-couple", action="store_true",
-                    help="[--retargeter ours] 엄지 목표를 검지에 묶지 않는다. "
-                         "끄면 사람이 엄지를 붙여도 로봇은 안 붙는다 (비교용)")
-    ap.add_argument("--calib-frames", type=int, default=30,
-                    help="엄지 정렬 캘리브레이션에 쓸 프레임 수 (0=건너뜀)")
+                    help="손끝 목표의 말단 마디 길이를 LEAP 값으로 쓸지, 사람에서 스케일할지")
 
     ap.add_argument("--real", action="store_true", help="실기도 함께 구동")
     ap.add_argument("--port", default=None)
@@ -88,10 +68,6 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--pybullet-gui", action="store_true", help="IK 목표점을 PyBullet 창으로")
     ap.add_argument("--no-viewer", action="store_true", help="MuJoCo 뷰어 끄기")
     ap.add_argument("--no-window", action="store_true", help="카메라 창 끄기")
-    ap.add_argument("--hand-min", type=float, default=ht.HandGuide.hand_min,
-                    help="손 위치 틀: 손등뼈(손목->중지MCP) 픽셀 길이 하한 (프레임 높이 비율)")
-    ap.add_argument("--hand-max", type=float, default=ht.HandGuide.hand_max,
-                    help="손 위치 틀: 상한. 녹화기와 같은 값을 쓸 것")
     ap.add_argument("--release-after", type=float, default=1.5,
                     help="손을 이 시간(초) 이상 놓치면 천천히 영점으로 (0=유지)")
     ap.add_argument("--seconds", type=float, default=0.0, help="지정 시간 뒤 자동 종료")
@@ -114,34 +90,13 @@ def main() -> int:
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
 
     tracker = ht.HandTracker(handedness=args.hand, mirror=args.mirror)
-    # 손 위치 틀. 녹화(p1_diag_record_poses.py)와 같은 틀 안에서 움직여야 같은 조건이다.
-    # MediaPipe 의 3D 추정은 손이 멀면 크기(배율)부터 달라져서, 캘리브레이션 때와 다른
-    # 거리에서 쓰면 손끝 목표가 도달거리 밖으로 나가 잔차가 수십 mm 로 뛴다.
-    guide = ht.HandGuide(hand_min=args.hand_min, hand_max=args.hand_max)
-    use_dex = args.retargeter == "dex"
-    if use_dex:
-        retargeter = DexRetargeter(
-            hand_type=args.hand,
-            retargeting_type=args.dex_type,
-            scaling_factor=args.dex_scale,
-            low_pass_alpha=args.dex_alpha,
-            max_speed=args.max_speed,
-        )
-        print(f"리타겟팅: dex-retargeting ({args.dex_type})")
-        print(f"  설정 {os.path.basename(retargeter.config_path)}")
-    else:
-        retargeter = LeapRetargeter(
-            gui=args.pybullet_gui,
-            scale=args.scale,
-            distal_mode=args.distal_mode,
-            smoothing=args.smoothing,
-            max_speed=args.max_speed,
-            dip_weight=args.dip_weight,
-            thumb_couple=not args.no_thumb_couple,
-            thumb_mode=args.thumb_mode,
-        )
-        print("리타겟팅: 직접 구현 (손끝 위치 IK)"
-              + ("" if not args.no_thumb_couple else "  [엄지 결합 꺼짐]"))
+    retargeter = LeapRetargeter(
+        gui=args.pybullet_gui,
+        scale=args.scale,
+        distal_mode=args.distal_mode,
+        smoothing=args.smoothing,
+        max_speed=args.max_speed,
+    )
 
     model = mujoco.MjModel.from_xml_path(MJCF_SCENE)
     data = mujoco.MjData(model)
@@ -165,51 +120,6 @@ def main() -> int:
 
         viewer = mujoco.viewer.launch_passive(model, data)
 
-    # dex-retargeting 은 손목 프레임을 매 프레임 추정하고 벡터를 맞추므로
-    # 사람마다 다른 엄지 안착 각도가 문제되지 않는다. 캘리브레이션이 필요 없다.
-    if args.calib_frames and not use_dex:
-        # 한때 자세를 두 개(편 손 + 엄지 접기) 받아 정렬 회전의 roll 까지 정하려 했다.
-        # roll 이 미결정인 것은 사실이지만, 실측 손 녹화로 A/B 한 결과 결과가 거의
-        # 안 바뀌었다(엄지-검지 간격 154.2 -> 150.0mm, 엄지 잔차 12.2 -> 13.3mm).
-        # 사람 엄지는 CMC 에서 보면 손바닥에 붙여도 방향이 5.8 도밖에 안 변해서
-        # 두 번째 자세가 관측량으로 약하다. 사용자에게 자세를 더 시킬 값어치가 없다.
-        # 근거는 retarget.finish_calibration 주석 참고.
-        print(f"\n[엄지 정렬] 손을 **펴서** 카메라에 보여 주세요. {args.calib_frames} 프레임 모읍니다.")
-        print("  사람 엄지가 손바닥 대비 놓인 방향은 LEAP 과 크게 다르고 사람마다도 다릅니다.")
-        print("  손을 화면의 상자 안에, 오른쪽 게이지 점을 초록 띠 안에 (틀 밖 프레임은 안 받습니다)")
-        collected = rejected = 0
-        t_calib = time.time()
-        while collected < args.calib_frames and time.time() - t_calib < 60:
-            ok, frame = cap.read()
-            if not ok:
-                continue
-            frame = tracker.preprocess(frame)
-            obs = tracker.process(frame)
-            in_box, reason, frac = guide.check(obs, frame.shape)
-            if obs is not None:
-                if in_box:
-                    retargeter.observe_calibration(obs.world)
-                    collected += 1
-                else:
-                    rejected += 1
-                if not args.no_window:
-                    ht.draw_landmarks(frame, obs)
-            if not args.no_window:
-                ht.draw_guide(frame, guide, in_box, reason, frac)
-                cv2.putText(frame, f"calibrating thumb {collected}/{args.calib_frames}",
-                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
-                cv2.imshow("teleop", frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
-        if retargeter.finish_calibration():
-            sc = retargeter.frozen_scales or {}
-            print(f"  완료. 보정각 {np.degrees(retargeter.thumb_align_angle()):.1f} deg,"
-                  f" 틀 밖이라 버린 프레임 {rejected}")
-            print("  고정 배율 " + "  ".join(f"{k} {v:.2f}" for k, v in sc.items()) + "\n")
-        else:
-            print(f"  표본이 부족해 건너뜁니다 (틀 안 {collected}, 틀 밖 {rejected})."
-                  " 배율이 매 프레임 다시 계산되고 엄지 정확도가 떨어집니다.\n")
-
     print("손을 카메라에 보이면 따라간다. q 또는 Ctrl-C 로 종료.")
     print(f"MuJoCo 시나리오: {os.path.relpath(MJCF_SCENE, REPO)}")
 
@@ -221,9 +131,6 @@ def main() -> int:
     loop_ms: list[float] = []
     restarts: list[int] = []
     jitter: list[float] = []   # 프레임 사이 관절각 변화. 진짜 지터인지 보는 지표
-    per_finger: list[np.ndarray] = []   # 손끝 4개 잔차 (index, middle, ring, thumb)
-    out_of_box = 0                       # 검출됐지만 틀 밖이었던 프레임
-    hand_frac: list[float] = []          # 손등뼈 픽셀 비율 (거리 대리값)
     start = last_report = time.time()
     prev = start
 
@@ -241,25 +148,13 @@ def main() -> int:
             frame = tracker.preprocess(frame)
             t0 = time.time()
             obs = tracker.process(frame)
-            in_box, reason, frac = guide.check(obs, frame.shape)
 
             if obs is not None:
                 detected += 1
                 lost_since = None
-                if not in_box:
-                    out_of_box += 1
-                hand_frac.append(frac)
                 q_prev = q_cmd
                 q_cmd = retargeter.retarget(obs.world, dt=dt)
-                if use_dex:
-                    tip_errors.append(float(np.nanmean(retargeter.tip_error())))
-                else:
-                    e = retargeter.tip_error()[1::2]          # 손끝 4개 (index, middle, ring, thumb)
-                    per_finger.append(e.copy())
-                    if args.thumb_mode == "map":
-                        e = e[:3]   # 엄지는 손끝 목표를 쫓지 않는다(관절각 매핑). 잔차가 뜻이 없다
-                    tip_errors.append(float(e.mean()))
-
+                tip_errors.append(float(retargeter.tip_error().mean()))
                 restarts.append(retargeter.last_restarts)
                 jitter.append(float(np.abs(q_cmd - q_prev).max()))
                 if not args.no_window:
@@ -299,11 +194,8 @@ def main() -> int:
                 tip = np.mean(tip_errors[-30:]) * 1000 if tip_errors else float("nan")
                 jit = np.degrees(np.mean(jitter[-30:])) if jitter else float("nan")
                 rst = np.mean(restarts[-30:]) if restarts else 0.0
-                # dex 는 벡터를 맞추므로 mm 잔차가 같은 뜻이 아니다. 라벨을 구분한다.
-                cost = (f"벡터오차 {tip:5.2f} mm" if use_dex
-                        else f"손끝잔차 {tip:5.2f} mm  재시도 {rst:3.1f}")
                 msg = (f"{fps:5.1f} fps  검출 {detected}/{frames}"
-                       f"  {cost}  지터 {jit:5.2f} deg"
+                       f"  IK 잔차 {tip:5.2f} mm  지터 {jit:5.2f} deg  재시도 {rst:3.1f}"
                        f"  처리 {np.mean(loop_ms[-30:]):4.1f} ms  접촉 {data.ncon:2d}")
                 if over_current:
                     msg += f"  ! 전류 초과 {over_current}"
@@ -311,7 +203,6 @@ def main() -> int:
                 last_report = now
 
             if not args.no_window:
-                ht.draw_guide(frame, guide, in_box, reason, frac)
                 status = f"{obs.handedness} {obs.score:.2f}" if obs else "no hand"
                 cv2.putText(frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                             (0, 200, 0) if obs else (0, 0, 255), 2)
@@ -344,36 +235,16 @@ def main() -> int:
     print(f"\n프레임 {frames}, {elapsed:.1f}초, 평균 {frames / max(elapsed, 1e-6):.1f} fps")
     if frames:
         print(f"손 검출률 {detected / frames:.0%}")
-    if tip_errors and use_dex:
+    if tip_errors:
         t = np.array(tip_errors) * 1000
-        print(f"목표 벡터 오차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm"
-              f" (dexpilot 이면 손끝간 거리 6개 + 손목->손끝 4개)")
-    elif tip_errors:
-        t = np.array(tip_errors) * 1000
-        print(f"IK 손끝 잔차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm (앞마디는 보조 목표라 제외)")
-        if per_finger:
-            pf = np.array(per_finger) * 1000
-            med = np.median(pf, axis=0)
-            print(f"  손가락별 잔차 중앙값  검지 {med[0]:.1f}  중지 {med[1]:.1f}  약지 {med[2]:.1f}"
-                  f"  엄지 {med[3]:.1f} mm"
-                  + ("  (엄지는 관절각 매핑이라 참고만)" if args.thumb_mode == "map" else ""))
-            print("  네 손가락이 다 5mm 를 넘으면 배율(거리)이나 거울상 문제다. 한 손가락만 크면 그 손가락의 추적이다.")
-        if not use_dex:
-            sc = retargeter.frozen_scales
-            print("  배율 " + ("고정 " + "  ".join(f"{k} {v:.2f}" for k, v in sc.items())
-                             if sc else "고정 안 됨 (캘리브레이션 실패 — 매 프레임 재계산)"))
-    if detected:
-        hf = np.array(hand_frac)
-        print(f"손 위치 틀: 밖이었던 프레임 {out_of_box}/{detected} ({out_of_box / detected:.0%}),"
-              f" 손등뼈 비율 중앙값 {np.median(hf):.3f} (허용 {guide.hand_min:.2f}~{guide.hand_max:.2f})")
+        print(f"IK 손끝 잔차 평균 {t.mean():.2f} mm, 최대 {t.max():.2f} mm")
     if jitter:
         j = np.degrees(np.array(jitter))
         print(f"프레임간 관절각 변화 평균 {j.mean():.2f} deg, 95% {np.percentile(j, 95):.2f} deg,"
               f" 최대 {j.max():.2f} deg")
+        print(f"IK 재시도 평균 {np.mean(restarts):.2f}회/프레임 (0 이면 첫 판에 다 풀렸다는 뜻)")
     if loop_ms:
         print(f"추적+리타겟 처리 평균 {np.mean(loop_ms):.1f} ms, 95% {np.percentile(loop_ms, 95):.1f} ms")
-    if restarts and not use_dex:
-        print(f"IK 재시도 평균 {np.mean(restarts):.2f}회/프레임 (0 이면 첫 판에 다 풀렸다는 뜻)")
     if hand is not None and frozen:
         print(f"전류 초과로 명령을 얼린 프레임 {frozen}회")
     return 0

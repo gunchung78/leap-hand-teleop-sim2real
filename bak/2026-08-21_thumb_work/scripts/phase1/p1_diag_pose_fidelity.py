@@ -113,6 +113,7 @@ def main() -> int:
         if "calib_rest" in cap and args.calib_frames else None
 
     model = mujoco.MjModel.from_xml_path(MJCF_SCENE)
+    jm.apply_model_limits(model)   # menagerie 엄지 범위 정정
     data = mujoco.MjData(model)
     g_th = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "th_tip")
     g_if = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "if_tip")
@@ -122,7 +123,10 @@ def main() -> int:
     GROUPS = [[idx[f"{f}_{j}"] for f in ("if", "mf", "rf")] for j in ("mcp", "pip", "dip")]
 
     print(f"녹화 {os.path.relpath(args.capture, REPO)}  자세 {len(labels)}개")
-    print("사람 실측 엄지-검지 손끝 간격(mm): 편손 73.2 / 엄지붙임 63.1 / 핀치 59.5 / 주먹 29.0\n")
+    # 사람 수치는 녹화에서 직접 센다 (박아 둔 숫자는 녹화를 바꾸면 어긋난다).
+    gaps = [np.linalg.norm(w[:, 4] - w[:, 8], axis=1).mean() * 1000 for w in poses]
+    print("사람 실측 엄지-검지 손끝 간격(mm): "
+          + " / ".join(f"{l} {g:.1f}" for l, g in zip(labels, gaps)) + "\n")
 
     for kind in args.which:
         r = make_retargeter(kind, calib if kind == "ours" else None)
