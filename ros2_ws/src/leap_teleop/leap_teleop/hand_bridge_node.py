@@ -14,8 +14,17 @@ LEAP Hand v1 Lite 는 플라스틱 기어(XL330)라 스톨 상태로 밀면 이�
 |           | 있을 때 켜도 실기가 확 움직이지 않는다 |
 | 범위 클립 | jm.clip_mujoco (MJCF ∩ 실기 규약) |
 | 속도 제한 | max_speed rad/s. cmd_rate(60 Hz) 타이머로 목표를 향해 램프 |
-| 전류 동결 | /leap_pos_vel_eff 를 poll_rate(30 Hz) 폴링. |effort| > current_warn(300) 인 모터가
-|           | 있으면 **명령을 그 자리에 얼린다.** 전부 current_release(250) 아래로 내려오면 푼다 |
+| 전류 동결 | /leap_pos_vel_eff 를 poll_rate(30 Hz) 폴링. |effort| > current_warn(400) 인 모터가
+|           | freeze_count(3) 번 **연속**으로 있으면 명령을 그 자리에 얼린다. 전부 current_release(300)
+|           | 아래로 내려오면 푼다. 한 표본으로 얼리지 않는 이유는 아래 "전류 값의 단위와 임계" |
+
+전류 값의 단위와 임계
+  업스트림 리더는 XL330 전류를 raw x 1.34 로 돌려준다(DEFAULT_CUR_SCALE). curr_lim 350 에
+  붙으면 ~469 로 읽힌다. 라이브 텔레오퍼레이션에서 손가락이 가속하는 순간 300~380 이 한두
+  표본 튀는데(th_cmc / if_pip / th_mcp), 이건 스톨이 아니라 움직이는 전류다. 임계 300 에 한
+  표본으로 얼리면 30 ms 마다 동결/해제가 반복돼 로그가 차고 움직임이 더듬거린다. 스톨은
+  한계(~469)에 **계속** 붙어 있으므로, 400 을 3표본(100 ms) 연속 넘을 때만 얼린다. 기어를
+  상하게 하는 건 지속 스톨이지 100 ms 과도 전류가 아니다(문서 4.5).
 | 명령 시효 | /leap/joint_cmd 가 cmd_timeout(2 s) 동안 없으면 마지막 목표를 유지한다(움직이지 않음) |
 | 규약 변환 | jm.safe_leaphand_command — MuJoCo 순서 -> 모터 ID 순서 + π 오프셋 |
 | 피드백    | 읽은 값을 MuJoCo 규약으로 되돌려 /real/joint_states (effort = 전류, mA 단위 추정) |
@@ -53,8 +62,9 @@ class HandBridgeNode(Node):
         self.declare_parameter("max_speed", 8.0)
         self.declare_parameter("cmd_rate", 60.0)
         self.declare_parameter("poll_rate", 30.0)
-        self.declare_parameter("current_warn", 300.0)
-        self.declare_parameter("current_release", 250.0)
+        self.declare_parameter("current_warn", 400.0)
+        self.declare_parameter("current_release", 300.0)
+        self.declare_parameter("freeze_count", 3)
         self.declare_parameter("cmd_timeout", 2.0)
         self.declare_parameter("engage_speed", 1.0)
         self.declare_parameter("engage_tol", 0.05)
@@ -65,6 +75,8 @@ class HandBridgeNode(Node):
         self.engaged = False         # enable 뒤 목표에 한 번 합류했는가
         self.current_warn = float(p("current_warn"))
         self.current_release = float(p("current_release"))
+        self.freeze_count = int(p("freeze_count"))
+        self._over_streak = 0
         self.cmd_timeout = float(p("cmd_timeout"))
         jm.self_check()
 
@@ -217,12 +229,15 @@ class HandBridgeNode(Node):
 
     def _check_current(self, cur: np.ndarray) -> None:
         over = [(jm.MUJOCO_JOINT_NAMES[i], round(float(cur[i]))) for i in np.where(cur > self.current_warn)[0]]
-        if over and not self.frozen:
+        self._over_streak = self._over_streak + 1 if over else 0
+        if not self.frozen and self._over_streak >= self.freeze_count:
             self.frozen = True
             self._n_frozen += 1
-            self.get_logger().warning(f"전류 초과 {over} — 명령 동결. 손을 빼서 자세를 풀면 자동 해제")
+            self.get_logger().warning(
+                f"전류 초과 {over} 가 {self._over_streak}표본 연속 — 명령 동결. 손을 빼서 자세를 풀면 자동 해제")
         elif self.frozen and np.all(cur < self.current_release):
             self.frozen = False
+            self._over_streak = 0
             self.get_logger().info("전류 정상. 동결 해제")
         self.over = over
 
