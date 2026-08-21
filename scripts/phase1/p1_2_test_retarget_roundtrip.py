@@ -161,8 +161,10 @@ def main() -> int:
     # 결합의 project_dist/escape_dist 는 절대 길이(30/50mm)라 정의상 상쇄되지 않는다.
     # 켜 두면 여기서 재는 것이 좌표계 정합성이 아니라 가짜 손 크기가 되어 버린다.
     # 결합의 크기 민감도는 아래 hand_size_sensitivity 에서 따로 잰다.
+    # 엄지 각도 매핑(thumb_mode="map")도 끈다. 그쪽은 손끝 위치를 맞추는 경로가 아니라
+    # 이 시험의 판정 기준(손끝 잔차)과 무관하다. 여기서는 IK 경로만 본다.
     rt = LeapRetargeter(smoothing=1.0, max_speed=1e9, distal_mode="leap",
-                        thumb_couple=False)
+                        thumb_couple=False, thumb_mode="ik")
 
     lo = jm.LIMITS_INTERSECTION_MJ_LOWER
     hi = jm.LIMITS_INTERSECTION_MJ_UPPER
@@ -230,7 +232,7 @@ def hand_size_sensitivity(args, rng) -> None:
     print("  가짜 손을 여러 크기로 만들어 결합이 목표를 얼마나 옮기는지 본다.")
     print(f"  {'손바닥폭mm':>10}{'엄지목표이동mm':>15}{'손끝잔차mm':>12}")
 
-    rt = LeapRetargeter(smoothing=1.0, max_speed=1e9, distal_mode="leap")
+    rt = LeapRetargeter(smoothing=1.0, max_speed=1e9, distal_mode="leap", thumb_mode="ik")
     lo, hi = jm.LIMITS_INTERSECTION_MJ_LOWER, jm.LIMITS_INTERSECTION_MJ_UPPER
     mid = 0.5 * (lo + hi)
     for pw in (0.030, 0.040, 0.050, 0.060, 0.070):

@@ -218,11 +218,17 @@ class LeapRetargeter:
         thumb_couple: bool = True,
         project_dist: float = 0.03,
         escape_dist: float = 0.05,
+        thumb_mode: str = "map",
+        thumb_gain_cmc: float = 2.0,
+        thumb_gain_mcp: float = 2.0,
+        thumb_gain_ipl: float = 1.0,
     ) -> None:
         import pybullet as p
 
         if distal_mode not in ("leap", "scaled"):
             raise ValueError("distal_mode 는 'leap' 또는 'scaled'")
+        if thumb_mode not in ("map", "ik"):
+            raise ValueError("thumb_mode 는 'map' 또는 'ik'")
 
         self.p = p
         self.gui = gui
@@ -250,6 +256,13 @@ class LeapRetargeter:
         self.thumb_couple = thumb_couple
         self.project_dist = project_dist
         self.escape_dist = escape_dist
+        # 엄지 모양은 관절각 매핑으로, 핀치만 IK 로. _thumb_map 참고.
+        self.thumb_mode = thumb_mode
+        self.thumb_gain = np.array([thumb_gain_cmc, thumb_gain_mcp, thumb_gain_ipl])
+        self._thumb_rest_feat: np.ndarray | None = None
+        self._thumb_rest_samples: list = []
+        self._thumb_alpha = 0.0          # 0 = 모양(매핑), 1 = 핀치(IK)
+        self._thumb_qmap = np.zeros(4)
 
         # 계산용 클라이언트는 항상 DIRECT 다.
         #
@@ -489,7 +502,87 @@ class LeapRetargeter:
         targets = np.array(targets)
         if self.thumb_couple:
             targets = self._couple_thumb(targets, world, scales, gain)
+        if self.thumb_mode == "map":
+            self._thumb_map(world)
         return targets
+
+    def thumb_features(self, world: np.ndarray) -> np.ndarray:
+        """사람 엄지에서 뽑는 특징 3개 (rad). 휴지 자세 대비 변화량을 LEAP 관절에 싣는다.
+
+            [0] 중간마디(MCP->IP)가 손바닥 평면에서 향하는 각. +x(검지->약지) 기준.
+                엄지를 손바닥에 붙이면 이 마디가 새끼손가락 쪽으로 돌아간다.
+                편 손 113도 -> 엄지 붙임 59도 -> 주먹 54도 (실측, 54~59도 차).
+            [1] MCP 굽힘 (CMC->MCP 와 MCP->IP 사이 각).     편 손 17 -> 붙임 41 -> 주먹 56
+            [2] IP 굽힘 (MCP->IP 와 IP->TIP 사이 각).       편 손 28 -> 붙임 67 -> 주먹 58
+
+        근위마디(CMC->MCP)는 안 쓴다. 사람 엄지가 손바닥을 가로지를 때 근위마디는
+        방향이 20도 남짓밖에 안 변한다(CMC 의 회내가 MediaPipe 점으로는 안 보인다).
+        중간마디가 가장 크게 움직이는 관측량이다.
+        """
+        _, h_rot, _ = self.human_frame(world)
+
+        def local(i):
+            return h_rot.T @ (world[i] - world[ht.WRIST])
+
+        b1 = local(ht.THUMB_MCP) - local(ht.THUMB_CMC)
+        b2 = local(ht.THUMB_IP) - local(ht.THUMB_MCP)
+        b3 = local(ht.THUMB_TIP) - local(ht.THUMB_IP)
+        d2 = b2 / max(np.linalg.norm(b2), 1e-9)
+
+        def between(a, b):
+            c = a @ b / max(np.linalg.norm(a) * np.linalg.norm(b), 1e-12)
+            return float(np.arccos(np.clip(c, -1.0, 1.0)))
+
+        return np.array([float(np.arctan2(d2[1], d2[0])), between(b1, b2), between(b2, b3)])
+
+    def _thumb_map(self, world: np.ndarray) -> None:
+        """엄지 관절각을 사람 엄지 **각도**에서 직접 만든다. 모양 담당. 핀치는 IK 담당.
+
+        왜 엄지만 각도 매핑인가
+        ---------------------
+        네 손가락은 손끝 위치 IK 가 잘 된다(손끝 잔차 0.5mm, 주먹 MCP/PIP/DIP 33/64/117).
+        엄지는 안 됐다. 사용자가 본 증상: 손을 펴면 엄지가 꺾여 있고, 손가락을 편 채
+        엄지를 손바닥에 붙여도 안 붙는다. 렌더로 확인하면 편 손에서 th_mcp 77도(결합
+        켬) 또는 th_axl -20 / th_mcp -19(결합 끔)였다 — 목표점은 1~5mm 로 맞췄는데
+        자세가 틀렸다. LEAP 엄지는 축 배치가 사람과 달라(th_axl 은 축이 손끝을 지나
+        손끝 위치로는 관측이 안 된다) 손끝 하나로는 자세가 결정되지 않는다.
+
+        그래서 엄지는 LEAP 공식 mano_to_leap_mapping.py 가 하는 대로 **관절각을 직접
+        옮긴다.** 그쪽은 MANO 의 해부학 정렬 오일러각(CMC 벌림/굽힘, MCP, IP)을 이득 1 로
+        LEAP th_cmc/th_axl/th_mcp/th_ipl 에 그대로 싣고 "반드시 튜닝하라"고 적어 두었다.
+        여기서는 MANO 대신 MediaPipe 점으로 같은 뜻의 각(thumb_features)을 재고,
+        **휴지 자세(편 손 캘리브레이션) 대비 변화량**에 이득을 곱한다. 편 손이면 정확히
+        영점 — LEAP 의 편 손 — 이 나온다. 편 손이 편 손으로 보이는 것을 구조로 보장한다.
+
+            th_cmc = K_cmc * (rest_sweep - sweep)     중간마디가 안쪽으로 돌수록 들린다
+            th_axl = 0                                 굽힘 평면 = 손가락 쪽 (렌더로 확인)
+            th_mcp = K_mcp * (mcp - rest_mcp)
+            th_ipl = K_ipl * (ip - rest_ip)
+
+        이득 (2.0 / 2.0 / 1.0) 은 이렇게 정했다. 편 손 -> 엄지 붙임에서 사람 중간마디가
+        54도 돌고 MCP 가 24도 더 굽는다. LEAP 이 "손바닥을 가로질러 접힌" 모양이 되려면
+        렌더상 th_cmc 105~120 / th_mcp 50~60 이 필요하다(cmc 는 손가락 축 둘레 회전이라
+        120 에서 손바닥 위로 눕는다). 54*2=108, 24*2=48. IP 는 사람 변화량(39도)이
+        그대로 보기 좋아 1.0. 녹화 4자세의 렌더는 README "엄지" 절에 있다.
+
+        핀치와 잇기
+        ----------
+        사람 엄지-검지 간격이 escape_dist(50mm) 위면 매핑 100%, project_dist(30mm)
+        밑이면 IK 100%(결합 목표 = 검지 끝), 사이는 관절 공간에서 선형 보간. IK 는
+        매 프레임 그대로 풀되 엄지 4관절만 이 비율로 섞는다. 네 손가락은 건드리지 않는다.
+        """
+        f = self.thumb_features(world)
+        rest = self._thumb_rest_feat if self._thumb_rest_feat is not None else f
+        d = f - rest
+        self._thumb_qmap = np.array([
+            self.thumb_gain[0] * (-d[0]),
+            0.0,
+            self.thumb_gain[1] * d[1],
+            self.thumb_gain[2] * d[2],
+        ])
+        g = float(np.linalg.norm(world[ht.THUMB_TIP] - world[ht.INDEX_TIP]))
+        span = max(self.escape_dist - self.project_dist, 1e-6)
+        self._thumb_alpha = float(np.clip((self.escape_dist - g) / span, 0.0, 1.0))
 
     def _couple_thumb(self, targets: np.ndarray, world: np.ndarray,
                       scales: dict, gain: float) -> np.ndarray:
@@ -547,8 +640,12 @@ class LeapRetargeter:
         if_mcp 128도(한계) + if_pip -21도(역굽힘)로 꺾인다. 채택하지 않았다.
 
         "엄지만 붙임" 자세는 결합이 오히려 나쁘게 한다(134 -> 186). 사람 간격 106mm
-        x 1.89 = 200mm 를 목표로 주는데 LEAP 엄지는 사람처럼 손바닥을 가로질러
-        접히지 않아 th_mcp 가 하한에 붙는다. "사람의 1.89배"가 엄지에서는 안 맞는다.
+        x 1.89 = 200mm 를 목표로 주는데 그 목표는 엄지를 뒤로 젖혀야 닿는 자리라
+        th_mcp 가 하한에 붙는다. "사람의 1.89배"가 엄지에서는 안 맞는다.
+        (한때 "LEAP 엄지는 손바닥을 가로질러 안 접힌다"고 적었는데 틀렸다. 실물은
+        접힌다 — geon 확인. 시뮬 쪽 한계표가 좁을 뿐이다: menagerie 의 th_mcp 하한
+        -27도, 공식 URDF 는 -69도. 그 한계는 이 모드(ik)에서만 문제가 되고, 기본
+        모드(map)는 양의 th_mcp 만 쓴다. _thumb_map 참고.)
 
         위치 IK 계열에서 손 모양과 핀치는 비율 차이 때문에 서로 당긴다. 둘 다 잡으려면
         관절각 사전항 + 손끝 쌍 거리 항을 한 목적 함수에 넣어야 한다. 아직 안 했다.
@@ -633,6 +730,7 @@ class LeapRetargeter:
         else:
             self._calib.append(d / n)
             self._calib_scales.append(self.measure_scales(world))
+            self._thumb_rest_samples.append(self.thumb_features(world))
 
     def finish_calibration(self) -> bool:
         """모은 표본으로 엄지 정렬 회전을 확정한다.
@@ -711,9 +809,12 @@ class LeapRetargeter:
             f: float(np.mean([s[f] for s in self._calib_scales]))
             for f in FINGERS
         }
+        if self._thumb_rest_samples:
+            self._thumb_rest_feat = np.mean(self._thumb_rest_samples, axis=0)
         self._calib = []
         self._calib_fold = []
         self._calib_scales = []
+        self._thumb_rest_samples = []
         return True
 
     def thumb_align_angle(self) -> float:
@@ -888,6 +989,11 @@ class LeapRetargeter:
         for f, r in residual.items():
             prev = self._residual_ema.get(f)
             self._residual_ema[f] = r if prev is None else 0.9 * prev + 0.1 * r
+        if self.thumb_mode == "map":
+            a = self._thumb_alpha
+            q = q.copy()
+            q[FINGER_JOINTS["thumb"]] = (1.0 - a) * self._thumb_qmap + a * q[FINGER_JOINTS["thumb"]]
+            q = jm.clip_mujoco(q)
         return q
 
     def _solve_dls(self, targets: np.ndarray, seed: np.ndarray | None = None) -> np.ndarray:
