@@ -22,9 +22,15 @@
   잡을 수 있다. 핀치인데 60mm 로 보이면 그 자리에서 고쳐 잡는다.
 - 녹화 중 손이 움직인 프레임(프레임간 평균 이동 > 임계)은 버린다. 안정 프레임이
   목표 수만큼 모일 때까지 받는다.
-- 자세가 하나 더 있다: **편 손 회전**. 모양은 고정한 채 손목만 돌린다. 이 자세에서
-  관절각이 흔들리면 센서/손목 프레임 문제고, 안 흔들리면 리타겟팅 문제다.
-  센서 탓인지 알고리즘 탓인지를 가르는 자세라 일부러 넣었다.
+- **손 위치 틀**이 있다. 화면 가운데 상자와 오른쪽 거리 게이지를 그린다. 손 전체가
+  상자 안에 있고 손등뼈(손목->중지 MCP) 픽셀 길이가 허용 범위에 있어야 "틀 안" 이다.
+  틀 밖이면 STABLE 이 안 뜨고, 녹화 중이면 그 프레임은 버린다. 사용자가 매번 다른
+  거리에서 찍으면 MediaPipe 의 3D 품질이 달라져 비교가 안 되기 때문이다.
+  틀의 정의와 기본값은 hand_tracker.HandGuide 에 있다 (기본: 카메라에서 약 30~50cm).
+  텔레오퍼레이션도 같은 틀 안에서 한다.
+- 손목 회전 자세는 없다. 한때 센서 한계를 가르려고 넣었는데, 손목을 돌리는 자세는
+  지원 범위 밖으로 정했다(단안 깊이 추정의 한계라 리타겟터로 못 고친다). 정면 자세
+  네 개만 받는다.
 
 저장 형식은 예전과 같다(calib_rest / calib_fold / pose3.. / pose_labels). 기존 진단
 스크립트가 그대로 읽는다.
@@ -50,14 +56,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from leap_hand_mapping import hand_tracker as ht  # noqa: E402
 
-# (라벨, 화면 안내, 안정 자세인가). 안정 자세는 움직인 프레임을 버리고, 움직이는
-# 자세(회전)는 전부 받는다.
+# (라벨, 화면 안내). 전부 정지 자세. 움직인 프레임은 버린다.
 POSES = [
-    ("편 손", "hand OPEN, palm to camera", True),
-    ("엄지만 붙임", "4 fingers open, THUMB folded to palm", True),
-    ("검지-엄지 핀치", "PINCH: thumb tip touches index tip, others open", True),
-    ("주먹", "FIST", True),
-    ("편 손 회전", "hand OPEN, slowly ROTATE wrist left/right, keep shape", False),
+    ("편 손", "hand OPEN, palm to camera"),
+    ("엄지만 붙임", "4 fingers open, THUMB folded to palm"),
+    ("검지-엄지 핀치", "PINCH: thumb tip touches index tip, others open"),
+    ("주먹", "FIST"),
 ]
 
 # 검지/중지/약지의 (MCP, PIP, DIP, TIP)
@@ -98,17 +102,17 @@ def put(frame, text, y, color=(255, 255, 255), scale=0.6):
     cv2.putText(frame, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2)
 
 
-def record_pose(cap, tracker, label, hint, stable, args) -> np.ndarray | None:
+def record_pose(cap, tracker, guide, label, hint, args) -> np.ndarray | None:
     """자세 하나를 받는다. 반환: (N,21,3) world 랜드마크, s 로 건너뛰면 None, q 면 예외."""
     import cv2
 
-    target = args.frames if stable else args.moving_frames
+    target = args.frames
     recent_gap: list[float] = []
     recent_mot: list[float] = []
     prev = None
     recording = False
     kept: list[np.ndarray] = []
-    dropped = 0
+    dropped_move = dropped_box = 0
     t_start = None
 
     while True:
@@ -117,6 +121,7 @@ def record_pose(cap, tracker, label, hint, stable, args) -> np.ndarray | None:
             continue
         frame = tracker.preprocess(frame)
         obs = tracker.process(frame)
+        in_box, reason, frac = guide.check(obs, frame.shape)
         w = None
         if obs is not None:
             w = np.asarray(obs.world, dtype=float)
@@ -131,28 +136,33 @@ def record_pose(cap, tracker, label, hint, stable, args) -> np.ndarray | None:
         else:
             prev = None
 
-        is_stable = (len(recent_mot) >= 10 and np.mean(recent_mot) < args.still_mm
-                     and np.std(recent_gap) < 2.0)
+        is_still = (len(recent_mot) >= 10 and np.mean(recent_mot) < args.still_mm
+                    and np.std(recent_gap) < 2.0)
+        is_stable = is_still and in_box
 
         # --- 화면 ---
+        ht.draw_guide(frame, guide, in_box, reason, frac)
         put(frame, f"[{label}]  {hint}", 28, (0, 200, 255), 0.7)
         if w is not None:
             mcp, pip, dip = bend_deg(w)
             put(frame, f"thumb-index gap {g:6.1f} mm   motion {mot:4.1f} mm/f", 58)
             put(frame, f"bend  mcp {mcp:5.1f}  pip {pip:5.1f}  dip {dip:5.1f} deg", 84)
-            col = (0, 220, 0) if is_stable else (0, 120, 255)
-            put(frame, "STABLE" if is_stable else "moving", 112, col, 0.8)
+            if is_stable:
+                put(frame, "STABLE", 112, (0, 220, 0), 0.8)
+            elif not in_box:
+                put(frame, "out of frame", 112, (0, 140, 255), 0.8)
+            else:
+                put(frame, "moving", 112, (0, 120, 255), 0.8)
         else:
             put(frame, "no hand", 58, (0, 0, 255), 0.8)
 
         if recording:
-            put(frame, f"REC {len(kept)}/{target}  dropped {dropped}", 150, (0, 0, 255), 0.9)
+            put(frame, f"REC {len(kept)}/{target}  dropped move {dropped_move} box {dropped_box}",
+                150, (0, 0, 255), 0.8)
         else:
             put(frame, "SPACE=record   r=redo   s=skip   q=quit", 150, (200, 200, 200), 0.55)
-            if stable:
-                put(frame, "hold still until STABLE, then SPACE", 175, (200, 200, 200), 0.55)
-            else:
-                put(frame, "press SPACE, then rotate slowly", 175, (200, 200, 200), 0.55)
+            put(frame, "hand in box, hold still until STABLE, then SPACE", 175,
+                (200, 200, 200), 0.55)
         cv2.imshow("record", frame)
         key = cv2.waitKey(1) & 0xFF
 
@@ -161,24 +171,26 @@ def record_pose(cap, tracker, label, hint, stable, args) -> np.ndarray | None:
         if key == ord("s"):
             return None
         if key == ord("r"):
-            recording, kept, dropped = False, [], 0
+            recording, kept, dropped_move, dropped_box = False, [], 0, 0
             continue
         if key == ord(" ") and not recording:
-            recording, kept, dropped = True, [], 0
+            recording, kept, dropped_move, dropped_box = True, [], 0, 0
             t_start = time.time()
             continue
 
         if recording:
             if w is not None:
-                if stable and mot > args.still_mm * 2.5:
-                    dropped += 1
+                if not in_box:
+                    dropped_box += 1
+                elif mot > args.still_mm * 2.5:
+                    dropped_move += 1
                 else:
                     kept.append(w)
             if len(kept) >= target:
                 return np.array(kept)
             if time.time() - t_start > args.timeout:
                 print(f"  {args.timeout:.0f}초 안에 {target}프레임을 못 모았다 "
-                      f"({len(kept)}개, 버림 {dropped}). 그만큼만 쓴다.")
+                      f"({len(kept)}개, 버림 움직임 {dropped_move} 틀밖 {dropped_box}). 그만큼만 쓴다.")
                 return np.array(kept) if kept else None
 
 
@@ -189,8 +201,13 @@ def main() -> int:
     ap.add_argument("--hand", default="Right", choices=["Right", "Left"])
     ap.add_argument("--mirror", action="store_true")
     ap.add_argument("--save", default="thumb_capture.npz")
-    ap.add_argument("--frames", type=int, default=60, help="안정 자세당 모을 프레임 수")
-    ap.add_argument("--moving-frames", type=int, default=150, help="회전 자세 프레임 수")
+    ap.add_argument("--frames", type=int, default=60, help="자세당 모을 프레임 수")
+    ap.add_argument("--hand-min", type=float, default=ht.HandGuide.hand_min,
+                    help="손등뼈(손목->중지MCP) 픽셀 길이 하한, 프레임 높이 비율. 작으면 너무 멀다")
+    ap.add_argument("--hand-max", type=float, default=ht.HandGuide.hand_max,
+                    help="상한. 크면 너무 가깝다")
+    ap.add_argument("--box", type=float, nargs=2, default=(ht.HandGuide.box_w, ht.HandGuide.box_h),
+                    metavar=("W", "H"), help="안내 상자 폭/높이 (프레임 비율)")
     ap.add_argument("--still-mm", type=float, default=1.0,
                     help="이 값(프레임간 평균 이동 mm) 아래면 '안정'으로 본다")
     ap.add_argument("--timeout", type=float, default=20.0, help="자세당 녹화 제한 시간(초)")
@@ -205,12 +222,16 @@ def main() -> int:
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     tracker = ht.HandTracker(handedness=args.hand, mirror=args.mirror)
+    guide = ht.HandGuide(box_w=args.box[0], box_h=args.box[1],
+                         hand_min=args.hand_min, hand_max=args.hand_max)
 
     if os.path.exists(args.save):
         print(f"주의: {args.save} 가 이미 있다. 끝까지 가면 덮어쓴다. q 로 빠지면 안 건드린다.")
 
     print("=" * 70)
     print("자세 녹화. 화면의 gap/bend 는 MediaPipe 가 지금 읽는 값이다.")
+    print("손을 상자 안에, 오른쪽 게이지 점이 초록 띠 안에 오게 거리를 맞춘다"
+          f" (손등뼈 {guide.hand_min:.2f}~{guide.hand_max:.2f} H).")
     print("자세를 잡고 STABLE 이 뜨면 SPACE. r 다시 / s 건너뜀 / q 저장 없이 종료")
     print("=" * 70)
 
@@ -218,9 +239,9 @@ def main() -> int:
     labels: list[str] = []
     summary = []
     try:
-        for i, (label, hint, stable) in enumerate(POSES):
+        for i, (label, hint) in enumerate(POSES):
             print(f"\n[{i + 1}/{len(POSES)}] {label} — {hint}", flush=True)
-            frames = record_pose(cap, tracker, label, hint, stable, args)
+            frames = record_pose(cap, tracker, guide, label, hint, args)
             if frames is None or len(frames) == 0:
                 print("  건너뜀")
                 continue
@@ -253,6 +274,7 @@ def main() -> int:
     fold_idx = labels.index("엄지만 붙임") if "엄지만 붙임" in labels else None
     rec["calib_fold"] = rec[f"pose{fold_idx + 3}"] if fold_idx is not None else np.zeros((0, 21, 3))
     rec["pose_labels"] = np.array(labels)
+    rec["guide"] = guide.to_array()   # [box_w, box_h, hand_min, hand_max] 어떤 틀로 찍었는지
     np.savez_compressed(args.save, **rec)
 
     print("\n" + "-" * 70)
