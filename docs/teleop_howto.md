@@ -8,6 +8,10 @@ Phase 1 파이프라인을 실제로 돌려 보는 순서. **0단계부터 차�
 > 실기(`--real`)는 **5단계**다. 그 전까지는 모터가 전혀 움직이지 않는다.
 > 실기를 붙이기 전에 [`real_hand_bringup.md`](real_hand_bringup.md) 를 먼저 끝내야 한다.
 
+두 경로가 있다. 아래 0~6단계는 **단일 스크립트 경로**(`p1_3_teleop_mujoco.py`)고, 같은 코어를
+ROS2 노드로 쪼갠 **ROS2 경로**는 맨 아래 "ROS2 로 돌리기"다. 처음이면 단일 스크립트로 추적과
+리타겟팅을 확인하고, 그다음 ROS2 로 간다. 알고리즘은 둘이 같다.
+
 ---
 
 ## 0단계 — 준비 (최초 1회)
@@ -271,3 +275,72 @@ Phase 0 매핑부터 다시 확인. 시뮬에서 이미 어긋나면 코드 회�
 **IK 잔차가 계속 5 mm 이상**
 사람 손 자세가 LEAP 범위 밖이다. `--pybullet-gui` 로 목표 구슬 위치를 본다.
 구슬 자체가 로봇에서 멀리 떨어져 있으면 `--scale` 이 잘못된 것이다.
+
+---
+
+## ROS2 로 돌리기
+
+단일 스크립트와 같은 코어(`leap_hand_mapping`)를 노드 넷으로 쪼갠 것이다. 아키텍처와 노드 표는
+README "Phase 1 — ROS2 통합".
+
+### 준비 (최초 1회)
+
+```bash
+conda activate leap-hand
+pip install -e .
+pip install empy==3.3.4 lark catkin_pkg colcon-common-extensions
+bash ros2_ws/setup_upstream.sh                  # third_party/LEAP_Hand_API 가 있어야 한다
+cd ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install                  # conda 의 colcon 이어야 한다 (which colcon 로 확인)
+source install/setup.bash
+```
+
+매 터미널마다: `conda activate leap-hand && source /opt/ros/humble/setup.bash && source ros2_ws/install/setup.bash`.
+`ros2 run` 은 PATH 의 `python3` 을 쓰므로 conda base(3.13)가 앞에 오면 `rclpy` 가 안 뜬다.
+
+### 시뮬만
+
+```bash
+ros2 launch leap_teleop sim.launch.py                  # 카메라 창(손 위치 틀) + MuJoCo 뷰어
+ros2 launch leap_teleop sim.launch.py mirror:=true     # 오른손이 Right 로 안 잡히면
+ros2 launch leap_teleop sim.launch.py show:=false viewer:=false   # 헤드리스
+```
+
+다른 터미널에서:
+
+```bash
+ros2 topic hz /hand/landmarks          # 손이 보이는 동안 ~30
+ros2 topic hz /leap/joint_cmd
+ros2 topic echo --once /leap/joint_cmd # 이름 16개가 MuJoCo 순서인지
+python scripts/phase1/p1_4_teleop_metrics.py --seconds 20   # Hz / 종단 지연 / 추종 오차 표
+```
+
+### 실기 (데드맨이 있다)
+
+```bash
+ros2 launch leap_teleop real.launch.py fake:=true      # 먼저 가짜 실기로 배선 확인
+ros2 launch leap_teleop real.launch.py                 # 실기. kP 600 / curr_lim 350 / port by-id 가 기본
+ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: true"     # 이걸 줘야 움직인다
+ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: false"    # 그 자리에서 멈춘다
+```
+
+- enable 하면 브리지가 먼저 실기 현재 자세를 읽고 **거기서부터** 램프한다. 켜자마자 점프하지 않는다.
+- 어떤 모터든 |전류| > 300 이면 명령을 그 자리에 얼린다. 손을 빼서 자세를 풀면 자동 해제.
+- 포트가 다르면 `port:=/dev/serial/by-id/...`. `ls /dev/serial/by-id` 로 확인.
+- `curr_lim` 은 350 이다. **올리지 말 것** (Lite 플라스틱 기어).
+
+실기 첫 확인 순서: 데드맨 OFF 상태에서 `/real/joint_states` 가 30 Hz 로 오는지 → enable →
+`python scripts/phase1/p1_5_step_response.py --source real --joints if_mcp` (관절 하나, 20°) → 전체.
+계단 응답은 카메라 없이 `tracker:=false` 로 띄우고 잰다(손이 보이면 명령이 섞인다).
+
+### 문제 해결 (ROS2)
+
+| 증상 | 확인 |
+|---|---|
+| `ModuleNotFoundError: rclpy._rclpy_pybind11 ... cpython-313` | conda base 가 PATH 앞. `conda activate leap-hand` |
+| 노드가 `leap_hand_mapping` 을 못 찾음 | `/usr/bin/colcon` 으로 빌드됨. conda 의 colcon 으로 다시 `colcon build` |
+| `No module named 'em'` (빌드) | `pip install empy==3.3.4 lark catkin_pkg` |
+| 브리지가 "/leap_position 서비스를 기다리는 중" | leaphand_node 가 안 떴다. 포트/전원/Dynamixel Wizard 점유 확인 |
+| 실기가 안 움직임 | 데드맨. `ros2 topic echo /teleop/enable` |
+
