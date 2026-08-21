@@ -27,7 +27,7 @@
 
 파라미터
   smoothing(0.4) max_speed(8.0 rad/s) distal_mode("leap") scale(0.0=자동)
-  hold_timeout(1.5) release_time(1.0) deadband_deg(0.5)
+  hold_timeout(1.5) release_time(1.0) deadband_deg(0.5) restart_mm(1.0)
 """
 
 from __future__ import annotations
@@ -57,6 +57,10 @@ class RetargetNode(Node):
         self.declare_parameter("hold_timeout", 1.5)
         self.declare_parameter("release_time", 1.0)
         self.declare_parameter("deadband_deg", 0.5)
+        # IK 재시도 임계(mm). 7cccfdd 기본 1 mm 는 실제 손에서 절대 못 미치는 값이라(정상 잔차 ~5 mm)
+        # 매 프레임 시드 5개를 전부 돌고, 프레임마다 이기는 해가 갈려 관절각이 튄다. 15 로 올리면
+        # 재시도 0, 잔차 그대로, 처리 35 -> 6 ms (f118b58 의 실측). 알고리즘은 그대로, 인자만 노출
+        self.declare_parameter("restart_mm", 1.0)
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.deadband = np.radians(float(p("deadband_deg")))
         self._q_sent = None
@@ -70,6 +74,7 @@ class RetargetNode(Node):
             distal_mode=str(p("distal_mode")),
             smoothing=float(p("smoothing")),
             max_speed=float(p("max_speed")),
+            restart_threshold=float(p("restart_mm")) / 1000.0,
         )
         self.hold_timeout = float(p("hold_timeout"))
         self.release_time = float(p("release_time"))
@@ -122,7 +127,7 @@ class RetargetNode(Node):
                 f"명령 {self._n}  리타겟 {np.mean(self._ms[-150:]):.1f} ms"
                 f"  촬영->명령 지연 {np.mean(self._lat[-150:]):.1f} ms"
                 f"  손끝잔차 {np.mean(self.rt.tip_error()[1::2]) * 1000:.1f} mm"
-                f"  데드밴드 유지 {self._held}/{self._n}"
+                f"  데드밴드 유지 {self._held}/{self._n}  재시도 {self.rt.last_restarts}"
             )
             self._last_log = now
 
