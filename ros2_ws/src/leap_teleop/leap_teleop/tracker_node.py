@@ -28,6 +28,7 @@ import time
 
 import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs_py import point_cloud2 as pc2
 from std_msgs.msg import Header
@@ -81,6 +82,8 @@ class TrackerNode(Node):
         )
 
     def _tick(self) -> None:
+        if not rclpy.ok():
+            return
         ok, frame = self.cap.read()
         stamp = self.get_clock().now().to_msg()   # 읽은 직후. 촬영 시각에 가장 가깝다
         if not ok:
@@ -133,7 +136,7 @@ def main(args=None) -> None:
     node = TrackerNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
