@@ -83,6 +83,11 @@ EE_LANDMARKS = {
 
 FINGERS = ["index", "middle", "ring", "thumb"]
 
+# pip_target=True 일 때 추가하는 세 번째 목표: 로봇 PIP 굽힘 관절(링크 원점) <-> 사람 PIP 랜드마크.
+# 엄지는 축 배치가 달라 각 대응이 없으므로 넣지 않는다.
+PIP_LINKS = {"index": 2, "middle": 7, "ring": 12}
+PIP_LANDMARKS = {"index": ht.INDEX_PIP, "middle": ht.MIDDLE_PIP, "ring": ht.RING_PIP}
+
 # MuJoCo 관절 순서에서 손가락별 4개 자유도.
 # 손가락끼리는 운동학적으로 독립이라 자코비안이 블록대각이고, 따라서 IK 실패도
 # 손가락 단위로 일어난다. 실패한 손가락만 다른 시드로 다시 푸는 데 쓴다.
@@ -167,6 +172,7 @@ class LeapRetargeter:
         restart_threshold: float = 0.001,
         smoothing: float = 0.4,
         max_speed: float = 8.0,
+        pip_target: bool = False,
     ) -> None:
         import pybullet as p
 
@@ -230,7 +236,32 @@ class LeapRetargeter:
                 f"  기대: {jm.MUJOCO_TO_MOTOR.tolist()} (joint_map.MUJOCO_TO_MOTOR)"
             )
 
-        self.ee_links = [idx for f in FINGERS for idx in EE_LINKS[f]]
+        # 목표점 배치. 기본은 손가락당 (앞마디=DIP관절, 손끝) 2점 = 8점.
+        # pip_target 이면 검지/중지/약지에 PIP 관절점을 앞에 하나씩 더해 3점 = 11점.
+        #
+        # 왜 PIP 를 넣는가 (pip_target)
+        # --------------------------
+        # 목표가 (DIP관절, 손끝) 둘뿐이면 PIP 관절 위치는 제약이 없다. MCP/PIP/DIP 굽힘의 배분이
+        # 널스페이스에 남아 IK 가 프레임마다 다른 배분을 고르고, 그게 정지 떨림으로 보인다.
+        # 녹화(정지 4자세) 실측: PIP 점을 더하면 프레임간 관절 변화 1.11 -> 0.33도(편 손),
+        # 0.84 -> 0.56도(엄지 붙임). 손 모양 자체는 거의 그대로고 처리 35 -> 43 ms.
+        # 손끝점 정의(realtip 이 축에서 20도 벗어난 패드점인 것)는 별개 문제라 여기서 안 건드린다.
+        self.pip_target = pip_target
+        self.ee_spec: list[tuple[str, int]] = []      # (손가락, 링크) 목표 순서
+        for f in FINGERS:
+            if pip_target and f in PIP_LINKS:
+                self.ee_spec.append((f, PIP_LINKS[f]))
+            self.ee_spec.append((f, EE_LINKS[f][0]))
+            self.ee_spec.append((f, EE_LINKS[f][1]))
+        self.ee_links = [link for _, link in self.ee_spec]
+        self.finger_slices = {
+            f: slice(min(i for i, (g, _) in enumerate(self.ee_spec) if g == f),
+                     max(i for i, (g, _) in enumerate(self.ee_spec) if g == f) + 1)
+            for f in FINGERS
+        }
+        self.tip_index = [i for i, (f, link) in enumerate(self.ee_spec) if link == EE_LINKS[f][1]]
+        self.dip_index = [i for i, (f, link) in enumerate(self.ee_spec) if link == EE_LINKS[f][0]]
+        self.target_weights = np.repeat(np.ones(len(self.ee_spec)), 3)
         self.reference = self._measure_reference()
         self._q = np.zeros(jm.NUM_JOINTS)
         self._last_targets: np.ndarray | None = None
@@ -346,6 +377,9 @@ class LeapRetargeter:
                     b = a + ref.rotation @ (s_f * d)
             else:
                 b = a
+            if self.pip_target and f in PIP_LINKS:
+                # PIP 관절점: 사람 PIP 랜드마크를 같은 뿌리·같은 배율로 옮긴다
+                targets.append(ref.root[f] + ref.rotation @ (s_f * (h_rot.T @ (world[PIP_LANDMARKS[f]] - world[i_root]))))
             targets.append(a)
             targets.append(b)
         return np.array(targets)
@@ -418,7 +452,7 @@ class LeapRetargeter:
         """자세 q 에서 손가락별 최대 손끝 잔차(m)."""
         self._set_joints(q)
         err = np.linalg.norm(self._ee_positions() - targets, axis=1)
-        return {f: float(err[2 * i:2 * i + 2].max()) for i, f in enumerate(FINGERS)}
+        return {f: float(err[self.finger_slices[f]].max()) for f in FINGERS}
 
     def restart_seeds(self, world: np.ndarray | None = None) -> list:
         """국소최소에서 빠져나올 재시도 시드들. 앞쪽일수록 먼저 쓴다.
@@ -531,9 +565,9 @@ class LeapRetargeter:
         return self._q.copy()
 
     def tip_error(self) -> np.ndarray:
-        """직전 프레임의 목표점 대비 실제 손끝 오차(m), 목표 8개 각각."""
+        """직전 프레임의 목표점 대비 실제 오차(m), 목표 각각 (순서 ee_spec; 손끝만 보려면 tip_index)."""
         if self._last_targets is None:
-            return np.zeros(len(FINGERS) * 2)
+            return np.zeros(len(self.ee_spec))
         return np.linalg.norm(self._ee_positions() - self._last_targets, axis=1)
 
     def set_pose(self, q) -> None:
@@ -549,10 +583,8 @@ class LeapRetargeter:
 
     def _create_debug_balls(self) -> None:
         p = self.p
-        colors = [(1, 0.3, 0.3, 1), (1, 0, 0, 1),
-                  (0.3, 1, 0.3, 1), (0, 1, 0, 1),
-                  (0.3, 0.3, 1, 1), (0, 0, 1, 1),
-                  (1, 1, 0.3, 1), (1, 1, 0, 1)]
+        base = {"index": (1, 0.3, 0.3), "middle": (0.3, 1, 0.3), "ring": (0.3, 0.3, 1), "thumb": (1, 1, 0.3)}
+        colors = [base[f] + (1,) for f, _ in self.ee_spec]
         for color in colors:
             vis = p.createVisualShape(
                 p.GEOM_SPHERE, radius=0.006, rgbaColor=color,

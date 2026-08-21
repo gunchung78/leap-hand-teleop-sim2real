@@ -49,6 +49,7 @@ def generate_launch_description():
         DeclareLaunchArgument("smoothing", default_value="0.4", description="리타겟 지수 평활. 떨리면 0.2"),
         DeclareLaunchArgument("deadband", default_value="0.5", description="리타겟 출력 데드밴드(deg). 0=끔"),
         DeclareLaunchArgument("restart_mm", default_value="1.0", description="IK 재시도 임계(mm). 15 면 재시도 0"),
+        DeclareLaunchArgument("pip_target", default_value="false", description="PIP 관절점 추가 (손가락당 3점)"),
         DeclareLaunchArgument("current_warn", default_value="400.0",
                               description="브리지 전류 동결 임계 (업스트림 리더 단위 = raw x 1.34; 한계 350 은 ~469)"),
         DeclareLaunchArgument("engage_speed", default_value="1.0",
@@ -67,7 +68,7 @@ def generate_launch_description():
             "camera": lc("camera"), "hand": lc("hand"), "mirror": lc("mirror"),
             "show": lc("show"), "viewer": lc("viewer"), "max_speed": lc("max_speed"),
             "tracker": lc("tracker"), "smoothing": lc("smoothing"), "deadband": lc("deadband"),
-            "restart_mm": lc("restart_mm"),
+            "restart_mm": lc("restart_mm"), "pip_target": lc("pip_target"),
         }.items(),
         condition=IfCondition(lc("sim")),
     )
@@ -82,7 +83,8 @@ def generate_launch_description():
              output="screen", emulate_tty=True,
              condition=IfCondition(PythonExpression(["'", lc("sim"), "' == 'false' and '", lc("tracker"), "' == 'true'"])),
              parameters=[{"max_speed": ParameterValue(lc("max_speed"), value_type=float), "smoothing": ParameterValue(lc("smoothing"), value_type=float),
-                          "deadband_deg": ParameterValue(lc("deadband"), value_type=float), "restart_mm": ParameterValue(lc("restart_mm"), value_type=float)}]),
+                          "deadband_deg": ParameterValue(lc("deadband"), value_type=float), "restart_mm": ParameterValue(lc("restart_mm"), value_type=float),
+                          "pip_target": ParameterValue(lc("pip_target"), value_type=bool)}]),
     ]
 
     bridge = Node(package="leap_teleop", executable="hand_bridge_node", name="hand_bridge_node",
