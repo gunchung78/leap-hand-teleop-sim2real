@@ -27,6 +27,8 @@ def generate_launch_description():
         DeclareLaunchArgument("max_speed", default_value="8.0"),
         DeclareLaunchArgument("deadband", default_value="0.5",
                               description="리타겟 출력 데드밴드(deg). 정지 떨림 제거. 0=끔"),
+        DeclareLaunchArgument("restart_mm", default_value="1.0",
+                              description="IK 재시도 임계(mm). 15 면 실제 손에서 재시도 0 (떨림·지연 시험용)"),
         DeclareLaunchArgument("tracker", default_value="true",
                               description="false 면 tracker/retarget 없이 sim_node 만 (계단 응답 등 카메라 없는 시험)"),
     ]
@@ -39,7 +41,7 @@ def generate_launch_description():
         Node(package="leap_teleop", executable="retarget_node", name="retarget_node",
              output="screen", emulate_tty=True, condition=IfCondition(lc("tracker")),
              parameters=[{"smoothing": lc("smoothing"), "max_speed": lc("max_speed"),
-                          "deadband_deg": lc("deadband")}]),
+                          "deadband_deg": lc("deadband"), "restart_mm": lc("restart_mm")}]),
         Node(package="leap_teleop", executable="sim_node", name="sim_node",
              output="screen", emulate_tty=True,
              parameters=[{"viewer": lc("viewer")}]),
