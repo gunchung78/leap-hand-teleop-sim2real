@@ -9,7 +9,7 @@
     목표각 = default_pose + action_scale * a           (클립은 sim_node / bridge 가 한다)
     주기   ctrl_dt (20 Hz)
 
-관측 잡음은 넣지 않는다(학습 땐 ±0.05 rad; 실기 읽기 자체가 잡음이다). `noise` 로 켤 수 있다.
+관측 잡음 `noise`(런치 기본 0.05 = 학습값). 0 이면 결정적 정책이 대칭 자세에 정체해 트윈에서 회전이 ≈0 이었다(08-24).
 관절 상태가 hold_timeout 동안 안 오면 명령을 멈춘다(정책이 낡은 상태로 돌지 않게).
 
     ros2 launch leap_teleop policy.launch.py policy:=models/rotate_z_v0.npz          # 트윈(큐브 장면)

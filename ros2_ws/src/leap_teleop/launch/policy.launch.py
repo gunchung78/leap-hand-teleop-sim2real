@@ -35,7 +35,7 @@ def generate_launch_description():
         DeclareLaunchArgument("sim", default_value="true", description="MuJoCo 큐브 장면 트윈"),
         DeclareLaunchArgument("viewer", default_value="true"),
         DeclareLaunchArgument("limits", default_value="model", description="관절 범위 표: model | teleop"),
-        DeclareLaunchArgument("noise", default_value="0.0", description="정책 관측 잡음 rad (학습 0.05)"),
+        DeclareLaunchArgument("noise", default_value="0.05", description="정책 관측 잡음 rad. 학습과 같은 0.05. 0 이면 결정적 정책이 정체해 트윈에서 회전 ≈0 (08-24 확인)"),
         DeclareLaunchArgument("max_speed", default_value="8.0"),
         DeclareLaunchArgument("engage_speed", default_value="1.0"),
         DeclareLaunchArgument("current_warn", default_value="400.0"),

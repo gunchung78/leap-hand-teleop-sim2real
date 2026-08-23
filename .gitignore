@@ -18,10 +18,11 @@ logs/
 checkpoints/
 
 # MediaPipe 모델 (7.5MB). scripts/phase1/p1_0_fetch_mediapipe_model.sh 로 받는다.
-models/
+models/*
 
 # ROS2 워크스페이스 산출물. src/leap_hand 는 업스트림 복사본 + 패치라 ros2_ws/setup_upstream.sh 로 만든다.
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
 ros2_ws/src/leap_hand/
+!models/*.npz
