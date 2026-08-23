@@ -15,8 +15,11 @@ LEAP Hand v1 Lite 는 플라스틱 기어(XL330)라 스톨 상태로 밀면 이�
 | 범위 클립 | jm.clip_mujoco (MJCF ∩ 실기 규약) |
 | 속도 제한 | max_speed rad/s. cmd_rate(60 Hz) 타이머로 목표를 향해 램프 |
 | 전류 동결 | /leap_pos_vel_eff 를 poll_rate(30 Hz) 폴링. |effort| > current_warn(400) 인 모터가
-|           | freeze_count(3) 번 **연속**으로 있으면 명령을 그 자리에 얼린다. 전부 current_release(300)
-|           | 아래로 내려오면 푼다. 한 표본으로 얼리지 않는 이유는 아래 "전류 값의 단위와 임계" |
+|           | freeze_count(3) 번 **연속**으로 있으면 얼린다. 얼릴 때 **실기가 지금 있는 자세를 한 번
+|           | 명령해 힘을 뺀다** — 막히던 목표를 그대로 두면 모터가 계속 밀어 전류가 한계(~469)에
+|           | 붙은 채 영영 안 풀린다(2026-08-23 rf_rot 교착 실측). 전부 current_release(300) 아래로
+|           | 내려오면 풀고, 다시 engage_speed 로 천천히 합류한다. 한 표본으로 얼리지 않는 이유는
+|           | 아래 "전류 값의 단위와 임계" |
 
 전류 값의 단위와 임계
   업스트림 리더는 XL330 전류를 raw x 1.34 로 돌려준다(DEFAULT_CUR_SCALE). curr_lim 350 에
@@ -217,7 +220,7 @@ class HandBridgeNode(Node):
         if eff.shape == (jm.NUM_JOINTS,):
             eff_mj = jm.motor_to_mujoco_order(eff)
             msg.effort = [float(v) for v in eff_mj]
-            self._check_current(np.abs(eff_mj))
+            self._check_current(np.abs(eff_mj), q)
         self.pub_state.publish(msg)
 
         now = time.time()
@@ -227,18 +230,25 @@ class HandBridgeNode(Node):
                                    + (f"  전류초과 {self.over}" if self.over else ""))
             self._last_log = now
 
-    def _check_current(self, cur: np.ndarray) -> None:
+    def _check_current(self, cur: np.ndarray, q_real: np.ndarray) -> None:
         over = [(jm.MUJOCO_JOINT_NAMES[i], round(float(cur[i]))) for i in np.where(cur > self.current_warn)[0]]
         self._over_streak = self._over_streak + 1 if over else 0
         if not self.frozen and self._over_streak >= self.freeze_count:
             self.frozen = True
             self._n_frozen += 1
+            # 힘 빼기: 실기가 **지금 있는** 자세를 목표로 한 번 보낸다. 명령만 멈추면 막히던 목표가
+            # 모터에 남아 계속 밀고(전류 한계 ~469), 그래서 해제 임계 밑으로 영영 못 내려온다.
+            if self.enabled and self.current is not None:
+                self.current = jm.clip_mujoco(q_real)
+                self._send(self.current)
             self.get_logger().warning(
-                f"전류 초과 {over} 가 {self._over_streak}표본 연속 — 명령 동결. 손을 빼서 자세를 풀면 자동 해제")
+                f"전류 초과 {over} 가 {self._over_streak}표본 연속 — 동결. 현재 자세를 명령해 힘을 뺐다."
+                " 전류가 내려오면 천천히 다시 합류")
         elif self.frozen and np.all(cur < self.current_release):
             self.frozen = False
             self._over_streak = 0
-            self.get_logger().info("전류 정상. 동결 해제")
+            self.engaged = False            # 같은 목표로 다시 갈 수 있으니 engage_speed 로
+            self.get_logger().info(f"전류 정상. 동결 해제 — {self.engage_speed:.1f} rad/s 로 다시 합류")
         self.over = over
 
     def _log_throttled(self, text: str) -> None:
