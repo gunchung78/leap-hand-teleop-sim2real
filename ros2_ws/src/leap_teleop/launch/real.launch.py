@@ -12,7 +12,7 @@ sim.launch.py 의 세 노드 + hand_bridge_node + leaphand_node(업스트림, �
 
 실기 파라미터는 여기서만 정한다 (인수인계 문서 4.1/4.2/4.3):
     curr_lim 350    Lite. 업스트림 런치의 500 을 쓰면 플라스틱 기어가 상한다. 올리지 말 것
-    kP 600 kI 0 kD 200    진동하면 kP 400 부근으로
+    kP 400 kI 0 kD 200    (600 은 실기가 떨었다. 2026-08-23 라이브 확인)
     port /dev/serial/by-id/...    열거 순서와 무관. ls /dev/serial/by-id 로 확인
 """
 
@@ -42,15 +42,15 @@ def generate_launch_description():
         DeclareLaunchArgument("fake", default_value="false",
                               description="true 면 실기 대신 fake_hand_node (Dynamixel 없음)"),
         DeclareLaunchArgument("port", default_value=DEFAULT_PORT),
-        DeclareLaunchArgument("kP", default_value="600.0"),
+        DeclareLaunchArgument("kP", default_value="400.0", description="라이브 확인 400 (600 은 떨림)"),
         DeclareLaunchArgument("kD", default_value="200.0"),
         DeclareLaunchArgument("curr_lim", default_value="350.0", description="Lite 는 350. 올리지 말 것"),
         DeclareLaunchArgument("max_speed", default_value="8.0"),
-        DeclareLaunchArgument("smoothing", default_value="0.4", description="리타겟 지수 평활. 떨리면 0.2"),
-        DeclareLaunchArgument("deadband", default_value="0.5", description="리타겟 출력 데드밴드(deg). 0=끔"),
-        DeclareLaunchArgument("restart_mm", default_value="1.0", description="IK 재시도 임계(mm). 15 면 재시도 0"),
-        DeclareLaunchArgument("pip_target", default_value="false", description="PIP 관절점 추가 (손가락당 3점)"),
-        DeclareLaunchArgument("tip_mode", default_value="realtip", description="로봇 손끝점 realtip | axis"),
+        DeclareLaunchArgument("smoothing", default_value="0.2", description="리타겟 지수 평활. 라이브 확인 0.2"),
+        DeclareLaunchArgument("deadband", default_value="1.0", description="리타겟 출력 데드밴드(deg). 0=끔"),
+        DeclareLaunchArgument("restart_mm", default_value="50.0", description="IK 재시도 임계(mm). 50 이면 재시도 0"),
+        DeclareLaunchArgument("pip_target", default_value="true", description="PIP 관절점 추가 (손가락당 3점)"),
+        DeclareLaunchArgument("tip_mode", default_value="axis", description="로봇 손끝점 realtip | axis"),
         DeclareLaunchArgument("current_warn", default_value="400.0",
                               description="브리지 전류 동결 임계 (업스트림 리더 단위 = raw x 1.34; 한계 350 은 ~469)"),
         DeclareLaunchArgument("engage_speed", default_value="1.0",

@@ -177,6 +177,7 @@ PyBullet 창이 하나 더 뜨고, IK 가 쫓고 있는 **목표점 8개**가 �
 | 증상 | 조정 |
 |---|---|
 | 로봇이 덜덜 떨림 | `--smoothing 0.2` (기본 0.4, 작을수록 부드럽고 느리다) |
+| (ROS2) 로봇이 떨림 | 기본값이 이미 `kP 400 smoothing 0.2 deadband 1.0 restart_mm 50 pip_target true tip_mode axis` (2026-08-23 라이브 확인, 하나만으로는 안 됐다). `p1_4_teleop_metrics.py` 의 정지 떨림 블록으로 출처 확인 |
 | 반응이 굼뜸 | `--smoothing 0.7` |
 | 손이 확확 튐 | `--max-speed 4` (기본 8 rad/s) |
 | 로봇이 과하게 굽음 | `--scale 2.0` 처럼 1단계 값보다 작게 |
@@ -320,7 +321,7 @@ python scripts/phase1/p1_4_teleop_metrics.py --seconds 20   # Hz / 종단 지연
 
 ```bash
 ros2 launch leap_teleop real.launch.py fake:=true      # 먼저 가짜 실기로 배선 확인
-ros2 launch leap_teleop real.launch.py                 # 실기. kP 600 / curr_lim 350 / port by-id 가 기본
+ros2 launch leap_teleop real.launch.py                 # 실기. kP 400 / curr_lim 350 / port by-id 가 기본
 ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: true"     # 이걸 줘야 움직인다
 ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: false"    # 그 자리에서 멈춘다
 ```
