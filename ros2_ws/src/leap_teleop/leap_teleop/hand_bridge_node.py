@@ -10,7 +10,7 @@ LEAP Hand v1 Lite 는 플라스틱 기어(XL330)라 스톨 상태로 밀면 이�
 | 시작 동기 | enable 되면 먼저 /leap_position 으로 실기 현재 자세를 읽어 거기서부터 램프한다.
 |           | 읽기 전에는 명령을 내지 않는다 — 켜자마자 목표로 점프하는 일을 막는다 |
 | 합류 램프 | enable 직후에는 engage_speed(1 rad/s)로 **천천히** 목표에 합류하고, 모든 관절이
-|           | engage_tol 안에 들어온 뒤에야 max_speed 로 바뀐다. 카메라가 이미 다른 자세를 보고
+|           | engage_tol 안에 들어오거나 engage_timeout(3 s)이 지나면 max_speed 로 바뀐다. 카메라가 이미 다른 자세를 보고
 |           | 있을 때 켜도 실기가 확 움직이지 않는다 |
 | 범위 클립 | jm.clip_mujoco (MJCF ∩ 실기 규약) |
 | 속도 제한 | max_speed rad/s. cmd_rate(60 Hz) 타이머로 목표를 향해 램프 |
@@ -72,10 +72,13 @@ class HandBridgeNode(Node):
         self.declare_parameter("cmd_timeout", 2.0)
         self.declare_parameter("engage_speed", 1.0)
         self.declare_parameter("engage_tol", 0.05)
+        self.declare_parameter("engage_timeout", 3.0)    # s. 목표가 계속 움직이면(정책) tol 로는 영영 못 붙는다
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.max_speed = float(p("max_speed"))
         self.engage_speed = float(p("engage_speed"))
         self.engage_tol = float(p("engage_tol"))
+        self.engage_timeout = float(p("engage_timeout"))
+        self._engage_t0 = None
         self.engaged = False         # enable 뒤 목표에 한 번 합류했는가
         self.current_warn = float(p("current_warn"))
         self.current_release = float(p("current_release"))
@@ -135,6 +138,7 @@ class HandBridgeNode(Node):
         if self.enabled:
             self.current = None          # 실기 현재 자세부터 다시 동기
             self.engaged = False         # 천천히 합류부터
+            self._engage_t0 = time.time()
             self.get_logger().info(f"데드맨 ON — 실기 현재 자세를 읽고 {self.engage_speed:.1f} rad/s 로 합류한다")
         else:
             self.get_logger().info("데드맨 OFF — 그 자리에서 멈춘다")
@@ -155,7 +159,11 @@ class HandBridgeNode(Node):
         step = np.clip(self.target - self.current, -speed * dt, speed * dt)
         self.current = jm.clip_mujoco(self.current + step, self.limits)
         self._send(self.current)
-        if not self.engaged and np.abs(self.target - self.current).max() < self.engage_tol:
+        if not self.engaged and self._engage_t0 is not None and time.time() - self._engage_t0 > self.engage_timeout:
+            # 목표가 계속 움직이는 경우(학습 정책 20 Hz): tol 안에 못 들어와도 램프는 제 역할(첫 점프 제거)을 했다
+            self.engaged = True
+            self.get_logger().info(f"합류 {self.engage_timeout:.0f} s 경과 — {self.max_speed:.1f} rad/s 로 (목표가 움직이는 중)")
+        elif not self.engaged and np.abs(self.target - self.current).max() < self.engage_tol:
             self.engaged = True
             self.get_logger().info(f"합류 완료 — 이제 {self.max_speed:.1f} rad/s 로 따라간다")
 
@@ -252,6 +260,7 @@ class HandBridgeNode(Node):
             self.frozen = False
             self._over_streak = 0
             self.engaged = False            # 같은 목표로 다시 갈 수 있으니 engage_speed 로
+            self._engage_t0 = time.time()
             self.get_logger().info(f"전류 정상. 동결 해제 — {self.engage_speed:.1f} rad/s 로 다시 합류")
         self.over = over
 
