@@ -24,8 +24,10 @@ conda activate "$ENV_NAME"
 
 # JAX CUDA 휠은 pypi 에서. playground 는 저장소 안의 클론(커밋 고정)을 editable 로.
 pip install -U pip
-pip install -U "jax[cuda12]"
 pip install -e "$REPO/third_party/mujoco_playground"
+# brax 0.14.2 는 jax.device_put_replicated 를 쓰는데 jax 0.10 에서 제거됐다 (08-23 확인) -> 0.7.2 고정.
+# playground/mjx 가 jax 를 최신으로 끌어올리므로 **그 뒤에** 고정한다.
+pip install -U "jax[cuda12]==0.7.2"
 # 선택: 학습 로그·영상
 pip install tensorboardX mediapy onnx tf2onnx 2>/dev/null || pip install tensorboardX mediapy
 
