@@ -112,6 +112,21 @@ LIMITS_INTERSECTION_MJ_UPPER = np.minimum(
     LIMITS_MJCF_UPPER, LIMITS_LEAPSIM_UPPER[MUJOCO_TO_MOTOR]
 )
 
+# 텔레오퍼레이션용 추가 제한 (geon, 2026-08-23). 벌림(rot) 관절이 옆 손가락에 걸려 전류가
+# 한계에 붙는 일이 있었다(라이브 rf_rot 468 동결). 모델 한계 안이라도 실기에서는 서로 닿는다.
+#   부호는 MJCF 로 확인: if_rot + = 중지 쪽, rf_rot - = 중지 쪽, mf_rot + = 약지 쪽 / - = 검지 쪽.
+#   mf_rot  : 좌우 3도
+#   if_rot  : 중지 쪽으로 3도까지만, 반대쪽(벌리기)은 모델 한계 유지
+#   rf_rot  : 중지 쪽으로 3도까지만, 반대쪽 유지
+# clip_mujoco 가 이 표를 쓰므로 IK 해, 시뮬 ctrl, 실기 명령이 전부 같은 범위를 받는다.
+ROT_TOWARD_MIDDLE = np.radians(3.0)
+LIMITS_TELEOP_MJ_LOWER = LIMITS_INTERSECTION_MJ_LOWER.copy()
+LIMITS_TELEOP_MJ_UPPER = LIMITS_INTERSECTION_MJ_UPPER.copy()
+LIMITS_TELEOP_MJ_UPPER[MUJOCO_JOINT_NAMES.index("if_rot")] = +ROT_TOWARD_MIDDLE
+LIMITS_TELEOP_MJ_LOWER[MUJOCO_JOINT_NAMES.index("mf_rot")] = -ROT_TOWARD_MIDDLE
+LIMITS_TELEOP_MJ_UPPER[MUJOCO_JOINT_NAMES.index("mf_rot")] = +ROT_TOWARD_MIDDLE
+LIMITS_TELEOP_MJ_LOWER[MUJOCO_JOINT_NAMES.index("rf_rot")] = -ROT_TOWARD_MIDDLE
+
 
 def _as_vec(joints) -> np.ndarray:
     arr = np.asarray(joints, dtype=np.float64)
@@ -141,10 +156,8 @@ def leaphand_to_mujoco(q_real) -> np.ndarray:
 
 
 def clip_mujoco(q_mujoco) -> np.ndarray:
-    """두 모델 모두가 허용하는 범위로 클립. MuJoCo 순서 입출력."""
-    return np.clip(
-        _as_vec(q_mujoco), LIMITS_INTERSECTION_MJ_LOWER, LIMITS_INTERSECTION_MJ_UPPER
-    )
+    """두 모델의 교집합 + 텔레오퍼레이션 추가 제한(벌림 관절)으로 클립. MuJoCo 순서 입출력."""
+    return np.clip(_as_vec(q_mujoco), LIMITS_TELEOP_MJ_LOWER, LIMITS_TELEOP_MJ_UPPER)
 
 
 def safe_leaphand_command(q_mujoco) -> np.ndarray:
@@ -157,7 +170,7 @@ def describe() -> str:
     finger = ["검지"] * 4 + ["중지"] * 4 + ["약지"] * 4 + ["엄지"] * 4
     lines = [
         f"{'MuJoCo':>3s} {'관절이름':<8s} {'손가락':<5s} {'모터ID':>5s}"
-        f" {'MJCF 범위':>18s} {'실기 범위':>18s} {'교집합':>18s}",
+        f" {'MJCF 범위':>18s} {'실기 범위':>18s} {'교집합':>18s} {'텔레옵':>18s}",
         "-" * 96,
     ]
     for i in range(NUM_JOINTS):
@@ -167,6 +180,7 @@ def describe() -> str:
             f"  [{LIMITS_MJCF_LOWER[i]:+.3f},{LIMITS_MJCF_UPPER[i]:+.3f}]"
             f"  [{LIMITS_LEAPSIM_LOWER[mid]:+.3f},{LIMITS_LEAPSIM_UPPER[mid]:+.3f}]"
             f"  [{LIMITS_INTERSECTION_MJ_LOWER[i]:+.3f},{LIMITS_INTERSECTION_MJ_UPPER[i]:+.3f}]"
+            f"  [{LIMITS_TELEOP_MJ_LOWER[i]:+.3f},{LIMITS_TELEOP_MJ_UPPER[i]:+.3f}]"
         )
     return "\n".join(lines)
 
@@ -179,6 +193,9 @@ def self_check() -> None:
     q = rng.uniform(LIMITS_MJCF_LOWER, LIMITS_MJCF_UPPER)
     assert np.allclose(leaphand_to_mujoco(mujoco_to_leaphand(q)), q)
     assert np.all(LIMITS_INTERSECTION_MJ_LOWER < LIMITS_INTERSECTION_MJ_UPPER)
+    assert np.all(LIMITS_TELEOP_MJ_LOWER < LIMITS_TELEOP_MJ_UPPER)
+    assert np.all(LIMITS_TELEOP_MJ_LOWER >= LIMITS_INTERSECTION_MJ_LOWER)
+    assert np.all(LIMITS_TELEOP_MJ_UPPER <= LIMITS_INTERSECTION_MJ_UPPER)
 
 
 def to_dict() -> dict:
@@ -197,6 +214,10 @@ def to_dict() -> dict:
         "limits_leapsim_motor_order": {
             "lower": LIMITS_LEAPSIM_LOWER.tolist(),
             "upper": LIMITS_LEAPSIM_UPPER.tolist(),
+        },
+        "limits_teleop_mujoco_order": {
+            "lower": LIMITS_TELEOP_MJ_LOWER.tolist(),
+            "upper": LIMITS_TELEOP_MJ_UPPER.tolist(),
         },
         "limits_intersection_mujoco_order": {
             "lower": LIMITS_INTERSECTION_MJ_LOWER.tolist(),
