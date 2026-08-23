@@ -155,9 +155,20 @@ def leaphand_to_mujoco(q_real) -> np.ndarray:
     return motor_to_mujoco_order(_as_vec(q_real) - SIM_TO_REAL_OFFSET)
 
 
-def clip_mujoco(q_mujoco) -> np.ndarray:
-    """두 모델의 교집합 + 텔레오퍼레이션 추가 제한(벌림 관절)으로 클립. MuJoCo 순서 입출력."""
-    return np.clip(_as_vec(q_mujoco), LIMITS_TELEOP_MJ_LOWER, LIMITS_TELEOP_MJ_UPPER)
+LIMIT_TABLES = {
+    "teleop": (LIMITS_TELEOP_MJ_LOWER, LIMITS_TELEOP_MJ_UPPER),          # 텔레옵 기본: 벌림 관절 3도 제한
+    "model": (LIMITS_INTERSECTION_MJ_LOWER, LIMITS_INTERSECTION_MJ_UPPER),  # 두 모델 교집합 (학습 정책 경로용)
+}
+
+
+def clip_mujoco(q_mujoco, limits: str = "teleop") -> np.ndarray:
+    """관절 범위로 클립. MuJoCo 순서 입출력.
+
+    limits="teleop" (기본): 교집합 + 벌림 관절 텔레옵 제한. 사람 손 리타겟 경로.
+    limits="model": 두 모델의 교집합만. 학습 정책(rotate_z)은 벌림을 ±20도 넘게 쓰므로 이걸 쓴다.
+    """
+    lo, hi = LIMIT_TABLES[limits]
+    return np.clip(_as_vec(q_mujoco), lo, hi)
 
 
 def safe_leaphand_command(q_mujoco) -> np.ndarray:
