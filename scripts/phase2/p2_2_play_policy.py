@@ -123,6 +123,7 @@ def main() -> int:
         yaw = rng.uniform(-np.pi, np.pi)
         d.qpos[cube_qadr + 3:cube_qadr + 7] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
         d.ctrl[:] = d.qpos[:16]
+        d.mocap_pos[:] = [-100.0, -100.0, -100.0]          # 목표 큐브(goal) 숨김 — env.reset 과 같게
         mujoco.mj_forward(m, d)
         last_act = np.zeros(16)
         angvels, torques, rots = [], [], []

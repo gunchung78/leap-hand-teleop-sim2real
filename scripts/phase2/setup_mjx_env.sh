@@ -29,7 +29,8 @@ pip install -e "$REPO/third_party/mujoco_playground"
 # playground/mjx 가 jax 를 최신으로 끌어올리므로 **그 뒤에** 고정한다.
 pip install -U "jax[cuda12]==0.7.2"
 # 선택: 학습 로그·영상
-pip install tensorboardX mediapy onnx tf2onnx 2>/dev/null || pip install tensorboardX mediapy
+pip install tensorboardX tensorboard mediapy onnx tf2onnx 2>/dev/null || pip install tensorboardX tensorboard mediapy
+conda install -y -c conda-forge ffmpeg      # mediapy 영상 저장 (업스트림 train 의 rollout mp4 도 이걸 쓴다)
 
 python - <<'EOF'
 import jax, mujoco, mujoco_playground, brax

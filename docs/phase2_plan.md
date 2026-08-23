@@ -116,7 +116,28 @@ S1 이 중요하다 — 6 GB 에서 몇 env 가 들어가고 1e8 스텝이 몇 �
 
 ---
 
-## 8. 지금 확인된 것 / 결정 대기
+## 8. 진행 기록
 
-- 확인: `leap-hand`(3.10)에선 playground 가 안 돈다 → 환경 분리(3장). GPU RTX 3060 Laptop 6 GB, JAX CUDA 동작.
+**S0 (08-23)** `scripts/phase2/setup_mjx_env.sh` → `leap-mjx`(py3.11). 버전 고정 이유:
+- playground 최신(e74217b) 은 py≥3.11, pip 0.1.0 은 mujoco 3.11 과 불일치 → 저장소 클론을 editable 로.
+- brax 0.14.2 가 `jax.device_put_replicated` 를 써서 jax 0.10 에서 죽음 → **jax[cuda12]==0.7.2** 고정(클론 설치 뒤에).
+- 영상 저장에 ffmpeg(conda-forge). tensorboard 로 곡선.
+- `p2_0_mjx_smoke.py`: 6 GB 에 **8192 env 들어간다.** 순수 시뮬 20k env-steps/s(8192), 학습 포함 25k steps/s → 1e8 ≈ 70 min.
+
+**S1 (08-23)** `p2_1_train.sh` (업스트림 `train_jax_ppo.py` 호출, 인자만). 2e7 스텝 v0-short: 보상 −0.41 → 5.5,
+angvel 항 −0.5 → 113 (에피소드 합, 확률적 평가 → 평균 ≈0.23 rad/s), 에피소드 길이 ≈490/500. 파이프라인 OK.
+업스트림 스크립트는 마지막 rollout mp4 저장에서 ffmpeg 없으면 죽는다(체크포인트는 이미 저장됨).
+
+**S2 (08-23)** `p2_2_play_policy.py`: CPU MuJoCo 재생 + 지표. brax 0.14.2 `checkpoint.load_policy` 가 설정 JSON 의
+`mean_kernel_init_fn: null` 에서 KeyError → 자체 로더(None 키 제거). 같은 정책을 MJX env 안에서 돌려 로더 검증:
+확률적 행동 angvel 합 [159, 75, 32] (학습 평가 113 ± 큰 분산) — 일치. 결정적은 [29, 3, 63] → 20M 정책은 아직 약하다
+(CPU 재생 0.02~0.06 rad/s, 25 s 동안 안 떨어뜨림). **알게 된 것 둘:**
+- 정책이 벌림(rot) 관절을 `mf_rot` −20~+26°, `rf_rot` −13~+22° 로 쓴다 → 텔레옵 제한(±3°)을 정책 경로에 그대로 쓰면 정책이 깨진다. S5 에서 클립 표를 선택할 수 있게 한다.
+- 토크(qfrc_actuator, ±0.2196 로 잘린 값)가 37% 의 시간 동안 350 mA 환산을 넘는다(최대 600 mA = 업스트림 한계). Lite 실기에서는 얼린다 → v1 필요(4장).
+`p2_3_export_policy.py`: 체크포인트 → numpy npz(MLP 32→512→256→128→32, silu, tanh(loc), 관측 정규화, default_pose). jax 와 최대 차 3e-7. ROS2 노드는 numpy 만 쓴다.
+
+**S3 진행 중** `v0-dr` (1e8, DR 켬) 15:24 시작.
+
+## 9. 결정 대기
+
 - 결정 대기 (geon): 실기 거치대가 손바닥 위(palm-up)인가 / 실물 큐브 준비 가능한가. **S5 전까지만 있으면 된다** — S0~S4 는 시뮬만.
