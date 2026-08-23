@@ -50,21 +50,21 @@ from leap_teleop import SENSOR_QOS, TOPIC_JOINT_CMD, TOPIC_LANDMARKS
 class RetargetNode(Node):
     def __init__(self) -> None:
         super().__init__("retarget_node")
-        self.declare_parameter("smoothing", 0.4)
+        self.declare_parameter("smoothing", 0.2)
         self.declare_parameter("max_speed", 8.0)
         self.declare_parameter("distal_mode", "leap")
         self.declare_parameter("scale", 0.0)
         self.declare_parameter("hold_timeout", 1.5)
         self.declare_parameter("release_time", 1.0)
-        self.declare_parameter("deadband_deg", 0.5)
+        self.declare_parameter("deadband_deg", 1.0)
         # IK 재시도 임계(mm). 7cccfdd 기본 1 mm 는 실제 손에서 절대 못 미치는 값이라(정상 잔차 ~5 mm)
         # 매 프레임 시드 5개를 전부 돌고, 프레임마다 이기는 해가 갈려 관절각이 튄다. 15 로 올리면
-        # 재시도 0, 잔차 그대로, 처리 35 -> 6 ms (f118b58 의 실측). 알고리즘은 그대로, 인자만 노출
-        self.declare_parameter("restart_mm", 1.0)
-        # PIP 관절점을 목표에 추가 (손가락당 3점). 정지 떨림 1.11 -> 0.33도 (녹화 실측). 기본 꺼짐
-        self.declare_parameter("pip_target", False)
-        # 손끝점 정의: realtip(패드 접촉점, 축에서 20도 이탈) | axis(손가락 축 위 점). 기본 realtip
-        self.declare_parameter("tip_mode", "realtip")
+        # 재시도 0(엄지 잔차 30mm+ 라 50 필요), 잔차 그대로, 처리 35 -> 6 ms. 알고리즘은 그대로, 인자만 노출
+        self.declare_parameter("restart_mm", 50.0)
+        # PIP 관절점을 목표에 추가 (손가락당 3점). 정지 떨림 1.11 -> 0.33도 (녹화 실측). 2026-08-23 라이브 확인 뒤 기본 켬
+        self.declare_parameter("pip_target", True)
+        # 손끝점 정의: realtip(패드 접촉점, 축에서 20도 이탈) | axis(손가락 축 위 점). 2026-08-23 라이브 확인 뒤 기본 axis
+        self.declare_parameter("tip_mode", "axis")
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.deadband = np.radians(float(p("deadband_deg")))
         self._q_sent = None

@@ -332,7 +332,7 @@ MediaPipe의 handedness 판정은 입력이 거울상이 아니라고 가정한�
 | `retarget_node` | `LeapRetargeter`(7cccfdd 손끝 IK) 호출 → `/leap/joint_cmd`. 손 유실 1.5 s 까지 유지, 그 뒤 1 s 에 걸쳐 영점 |
 | `sim_node` | `/leap/joint_cmd` → MuJoCo `ctrl` → 물리 스텝(60 Hz) → `/sim/joint_states`. qpos 를 직접 넣지 않는다 |
 | `hand_bridge_node` | 실기로 나가는 **유일한 경로.** 데드맨 `/teleop/enable`(기본 false), 시작 시 실기 자세 동기, ON 직후 1 rad/s 로 **천천히 합류**한 뒤 8 rad/s, 클립, `|전류| > 400` 이 100 ms 연속이면 명령 동결, `safe_leaphand_command` 변환, `/real/joint_states` 발행 |
-| `leaphand_node.py` | **업스트림 그대로**(+패치: 포트 파라미터, 시작 시 **현재 자세 유지** `hold_on_start`). 런치에서 `kP 600 / curr_lim 350 / port by-id` 만 넘긴다 |
+| `leaphand_node.py` | **업스트림 그대로**(+패치: 포트 파라미터, 시작 시 **현재 자세 유지** `hold_on_start`). 런치에서 `kP 400 / curr_lim 350 / port by-id` 만 넘긴다 |
 | `fake_hand_node` | 업스트림 인터페이스만 흉내내는 더미. 실기 없이 배선·데드맨·전류 동결 시험 |
 
 `header.stamp` 는 카메라 촬영 시각을 끝까지 전파한다. 어느 노드에서든 `now - stamp` 가 종단 지연이다.
@@ -388,6 +388,24 @@ fake 실기 + MuJoCo, 카메라 없이(`tracker:=false`), 스텝 20° — 재현
   76 ms, 리타겟 38 ms/frame(7cccfdd 리타겟터 고유 — 매 프레임 재시도 5회).
 
 geon 라이브 확인(2026-08-21): `sim.launch.py` 가 단일 스크립트와 **똑같이 움직인다.**
+
+**떨림 (2026-08-23 라이브 확인).** 실기가 kP 600 에서 정지 상태로 떨었다. 원인이 하나가 아니라
+네 개가 겹쳐 있었고 — IK 재시도(`restart_mm` 1 mm 는 도달 불가라 매 프레임 시드 5개가 번갈아 이김),
+랜드마크 잡음(`smoothing` 0.4), 2점 목표의 PIP 널스페이스, 모터 게인 — **하나씩 바꿔서는 안 보였고
+전부 넣어야 멎었다.** 그래서 아래 조합이 런치와 노드의 **기본값**이다:
+
+| 인자 | 전 | 후 | 뜻 |
+|---|---|---|---|
+| `kP` | 600 | **400** | 모터 P 게인 (실기만) |
+| `smoothing` | 0.4 | **0.2** | 리타겟 지수 평활 |
+| `deadband` | 0.5° | **1.0°** | 출력 변화가 이보다 작으면 직전 명령 재송 |
+| `restart_mm` | 1 | **50** | IK 재시도 임계. 엄지 잔차가 30 mm+ 라 50 이어야 재시도 0 (35 → 6 ms/frame) |
+| `pip_target` | false | **true** | PIP 관절점을 목표에 추가 (손가락당 3점) |
+| `tip_mode` | realtip | **axis** | 로봇 손끝점을 패드(축에서 20° 이탈) 대신 손가락 축 위 점으로 |
+
+예전 동작으로 돌리려면 `kP:=600 smoothing:=0.4 deadband:=0.5 restart_mm:=1 pip_target:=false tip_mode:=realtip`.
+`python scripts/phase1/p1_4_teleop_metrics.py` 의 **정지 떨림** 블록(관절 명령 / 실기 위치 / 시뮬 위치 /
+랜드마크 간격 표준편차)이 떨림의 출처를 가른다 — 명령이 조용한데 실기가 떨면 모터, 명령이 떨면 리타겟/센서.
 
 실기 계단 응답 (2026-08-21, 데드맨 → `if_mcp` 한 관절 → 16관절 전체, 관절당 20°, 표본 41~44):
 
