@@ -76,6 +76,8 @@ def main() -> int:
     bs = [np.asarray(pol[k]["bias"]) for k in layers]
     obs_mean = np.asarray(norm.mean["state"]); obs_std = np.asarray(norm.std["state"])
     # brax running_statistics.normalize 와 같은 std 처리(아주 작은 std 보호)를 수치 검사로 확인한다
+    from lite_env import maybe_register  # noqa: E402
+    maybe_register(args.env_name)
     env_cfg = registry.get_default_config(args.env_name)
     env_cfg.impl = "jax"
     env = registry.load(args.env_name, config=env_cfg)

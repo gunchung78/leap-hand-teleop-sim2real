@@ -94,10 +94,22 @@ def main() -> int:
     print(f"체크포인트 {ckpt}")
     policy = jax.jit(load_policy(ckpt, deterministic=True))
 
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from lite_env import maybe_register  # noqa: E402
+    maybe_register(args.env_name)         # Lite 변형이면 등록 (토크 상한 0.128)
     cfg = registry.get_default_config(args.env_name)
     cfg.impl = "jax"
+    env_json = ckpt.parent / "config.json"     # 학습 때의 env 설정 (torque_limit, 보상 계수 등) — 있으면 그걸 쓴다
+    if env_json.exists():
+        import json
+        saved = json.loads(env_json.read_text())
+        for k in ("torque_limit", "action_scale", "ctrl_dt", "sim_dt"):
+            if k in saved:
+                cfg[k] = saved[k]
     env = registry.load(args.env_name, config=cfg)
     m = env.mj_model                      # 같은 모델, CPU MuJoCo
+    cap = float(np.abs(m.jnt_actfrcrange[:16]).max())
+    print(f"관절 토크 상한 ±{cap:.4f} N·m (= {cap / TORQUE_PER_AMP * 1000:.0f} mA)")
     d = mujoco.MjData(m)
     n_sub = int(round(cfg.ctrl_dt / m.opt.timestep))
     key = m.key("home")
