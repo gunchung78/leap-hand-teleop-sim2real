@@ -136,7 +136,17 @@ angvel 항 −0.5 → 113 (에피소드 합, 확률적 평가 → 평균 ≈0.23
 - 토크(qfrc_actuator, ±0.2196 로 잘린 값)가 37% 의 시간 동안 350 mA 환산을 넘는다(최대 600 mA = 업스트림 한계). Lite 실기에서는 얼린다 → v1 필요(4장).
 `p2_3_export_policy.py`: 체크포인트 → numpy npz(MLP 32→512→256→128→32, silu, tanh(loc), 관측 정규화, default_pose). jax 와 최대 차 3e-7. ROS2 노드는 numpy 만 쓴다.
 
-**S3 진행 중** `v0-dr` (1e8, DR 켬) 15:24 시작.
+**S3 진행 중** `v0-dr` (1e8, DR 켬) 15:24 시작. 평가 angvel 합 11M 14 → 22M 109 → 33M 197 (sps 23k).
+
+**S4 준비 (08-23)** `lite_env.py`: 업스트림 클래스 상속, 모델 로드 뒤 `jnt_actfrcrange` 를 ±0.128 로, 벌점
+torques −0.1 / energy −1e-3 / action_rate −0.001 (reorient 환경 값 참고). `p2_4_train_lite.py` 가 등록 후 업스트림
+train main 호출. CPU 스모크 통과. 본 학습은 v0-dr 끝난 뒤 GPU 에서.
+
+**S5 (08-23, 골격 완료)** `policy_node`(numpy 추론 0.22 ms, 20 Hz) + `policy.launch.py` + `sim_node scene:=cube`
+(`leap_hand_mapping/cube_scene.py` 가 playground 장면을 assets 사전으로 연다) + `limits` 표 선택(model|teleop).
+헤드리스 트윈 확인: 20M 정책이 큐브를 25 s 쥐고 있음(각속도 ≈0, 정책이 약해서). `real:=true fake:=true` 도 확인 —
+이때 브리지가 ENGAGING 에 갇혔다(목표가 20 Hz 로 움직여 tol 안에 못 듦) → `engage_timeout` 3 s 추가.
+남은 것: 본 학습 정책으로 트윈에서 회전 확인 → S6 실기.
 
 ## 9. 결정 대기
 
