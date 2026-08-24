@@ -20,8 +20,7 @@ sudo apt update
 sudo apt install -y git build-essential ffmpeg
 # ROS2 Humble (없으면): https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debians.html
 sudo apt install -y ros-humble-desktop python3-colcon-common-extensions   # 시스템 colcon 은 쓰지 않지만 의존성 때문에
-# NVIDIA 드라이버: nvidia-smi 가 뜨면 된다 (CUDA 툴킷은 pip 의 jax[cuda12] 가 가져온다)
-nvidia-smi
+# NVIDIA 드라이버는 불필요 (MediaPipe·MuJoCo 모두 CPU)
 ```
 
 ## 1. 저장소와 참조 저장소
@@ -64,7 +63,6 @@ which colcon                                            # .../envs/leap-hand/bin
 ```
 
 검증된 버전: mujoco 3.11.0, mediapipe 1.0.1, opencv 5.0, pybullet 3.2.7, numpy 2.2.6, dynamixel-sdk 4.0.5.
-(`jax`/`brax` 가 이 환경에 남아 있어도 쓰지 않는다.)
 
 ### 2.1 ROS2 워크스페이스
 
