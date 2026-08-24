@@ -152,7 +152,7 @@ LEAP Hand v1 **Lite**(Dynamixel XL330-M288-T ×16, 플라스틱 기어), U2D2, 5
 
 ## Author
 
-Geon Lee (geonlee) — [sweng.geon@gmail.com](mailto:sweng.geon@gmail.com) / [gunchung78@gmail.com](mailto:gunchung78@gmail.com)
+DoulRobotics Geon Lee — [sweng.geon@gmail.com](mailto:sweng.geon@gmail.com) / [gunchung78@gmail.com](mailto:gunchung78@gmail.com)
 
 ## 라이선스
 
