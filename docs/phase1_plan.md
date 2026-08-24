@@ -58,7 +58,7 @@ ROS2 노드 그래프이고, 이력서 문구도 *"ROS2로 통합해 단일 명�
 2. **업스트림 `leaphand_node.py` 는 포트를 `/dev/ttyUSB0→1→2` 로 하드코딩한다.**
    지금 이 머신에는 FTDI 장치가 3개 붙어 있다.
    ```
-   usb-FTDI_USB__-__Serial_Converter_FTBIN91W-if00-port0 -> ttyUSB0   (U2D2)
+   usb-FTDI_USB__-__Serial_Converter_<시리얼>-if00-port0 -> ttyUSB0   (U2D2)
    usb-FTDI_Dual_RS232-HS-if00-port0                     -> ttyUSB1
    usb-FTDI_Dual_RS232-HS-if01-port0                     -> ttyUSB2
    ```
@@ -116,7 +116,7 @@ ROS2 노드 그래프이고, 이력서 문구도 *"ROS2로 통합해 단일 명�
   문제가 여기서 해소된다.
 - **알고리즘은 ROS 를 모른다.** 추적·리타겟팅은 `leap_hand_mapping/` 에 순수 파이썬으로 두고
   노드는 그걸 호출만 한다. 카메라·ROS 없이 테스트할 수 있어야 하고,
-  Phase 2 에서 학습한 정책을 배포할 때도 같은 코어를 쓴다.
+  나중에 학습 정책을 배포할 때도 같은 코어를 쓴다.
 - **QoS 는 sensor 계열 BEST_EFFORT, depth 1.** 텔레오퍼레이션에서 밀린 프레임은
   쓰레기다. 큐에 쌓아 지연을 만들지 않고 최신 것만 쓴다.
 
@@ -209,7 +209,7 @@ docs/
 ```python
 parameters=[{'kP': 600.0, 'kI': 0.0, 'kD': 200.0,
              'curr_lim': 350.0,                       # Lite. 올리지 말 것
-             'port': '/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBIN91W-if00-port0'}]
+             'port': '/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_<시리얼>-if00-port0'}]
 ```
 
 ---
@@ -217,7 +217,7 @@ parameters=[{'kP': 600.0, 'kI': 0.0, 'kD': 200.0,
 ## 5.6 ★ 최대 쟁점 — "로봇이 손처럼 움직이지 않는다"
 
 이 프로젝트의 실질적 문제다. 파이프라인은 돌아갔지만 로봇 손 모양이 사람 손과 달랐다.
-녹화해 둔 `thumb_capture.npz`(사람 손 4자세, 프레임 360여 개)로 원인을 측정했다.
+녹화해 둔 `data/thumb_capture.npz`(사람 손 4자세, 프레임 360여 개)로 원인을 측정했다.
 
 ### 무엇이 잘못되고 있었나
 

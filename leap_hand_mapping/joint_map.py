@@ -55,8 +55,7 @@ import numpy as np
 NUM_JOINTS = 16
 
 # MuJoCo(menagerie / mujoco_playground) 의 qpos = ctrl 순서.
-# mujoco_playground 의 leap_hand_constants.JOINT_NAMES 와 동일하므로
-# 이 매핑 테이블은 Phase 2(MJX 학습)에서도 그대로 재사용된다.
+# mujoco_playground 의 leap_hand_constants.JOINT_NAMES 와도 동일하다.
 MUJOCO_JOINT_NAMES = [
     "if_mcp", "if_rot", "if_pip", "if_dip",   # 검지
     "mf_mcp", "mf_rot", "mf_pip", "mf_dip",   # 중지
@@ -155,9 +154,20 @@ def leaphand_to_mujoco(q_real) -> np.ndarray:
     return motor_to_mujoco_order(_as_vec(q_real) - SIM_TO_REAL_OFFSET)
 
 
-def clip_mujoco(q_mujoco) -> np.ndarray:
-    """두 모델의 교집합 + 텔레오퍼레이션 추가 제한(벌림 관절)으로 클립. MuJoCo 순서 입출력."""
-    return np.clip(_as_vec(q_mujoco), LIMITS_TELEOP_MJ_LOWER, LIMITS_TELEOP_MJ_UPPER)
+LIMIT_TABLES = {
+    "teleop": (LIMITS_TELEOP_MJ_LOWER, LIMITS_TELEOP_MJ_UPPER),          # 텔레옵 기본: 벌림 관절 3도 제한
+    "model": (LIMITS_INTERSECTION_MJ_LOWER, LIMITS_INTERSECTION_MJ_UPPER),  # 두 모델 교집합 (텔레옵 벌림 제한 없음)
+}
+
+
+def clip_mujoco(q_mujoco, limits: str = "teleop") -> np.ndarray:
+    """관절 범위로 클립. MuJoCo 순서 입출력.
+
+    limits="teleop" (기본): 교집합 + 벌림 관절 텔레옵 제한. 사람 손 리타겟 경로.
+    limits="model": 두 모델의 교집합만 (벌림 관절 텔레옵 제한 없음).
+    """
+    lo, hi = LIMIT_TABLES[limits]
+    return np.clip(_as_vec(q_mujoco), lo, hi)
 
 
 def safe_leaphand_command(q_mujoco) -> np.ndarray:

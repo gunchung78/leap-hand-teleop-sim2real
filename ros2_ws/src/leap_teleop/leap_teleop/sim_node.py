@@ -44,11 +44,13 @@ class SimNode(Node):
         self.declare_parameter("viewer", True)
         self.declare_parameter("rate", 60.0)
         self.declare_parameter("publish_rate", 60.0)
+        self.declare_parameter("limits", "teleop")        # 이름 없는 명령 클립 표 (teleop | model)
         p = lambda n: self.get_parameter(n).value  # noqa: E731
 
         import mujoco
 
         self.mujoco = mujoco
+        self.limits = str(p("limits"))
         path = str(p("model_path"))
         if not os.path.exists(path):
             raise FileNotFoundError(f"MuJoCo 모델이 없다: {path} (README 환경 구성의 menagerie clone 참고)")
@@ -87,10 +89,10 @@ class SimNode(Node):
         self._last_log = self._prev
         self.step_timer = self.create_timer(1.0 / float(p("rate")), self._step)
         self.pub_timer = self.create_timer(1.0 / float(p("publish_rate")), self._publish)
-        self.get_logger().info(f"{os.path.relpath(path, REPO)}  viewer={p('viewer')}  {TOPIC_JOINT_CMD} -> ctrl")
+        self.get_logger().info(f"{os.path.relpath(path, REPO)}  viewer={p('viewer')}  범위 {self.limits}  {TOPIC_JOINT_CMD} -> ctrl")
 
     def _on_cmd(self, msg: JointState) -> None:
-        q = jm.clip_mujoco(np.array(msg.position, dtype=float)) if len(msg.name) == 0 else None
+        q = jm.clip_mujoco(np.array(msg.position, dtype=float), self.limits) if len(msg.name) == 0 else None
         if q is None:
             # 이름으로 맞춘다. 모르는 이름은 무시, 빠진 관절은 직전 값 유지
             for name, pos in zip(msg.name, msg.position):

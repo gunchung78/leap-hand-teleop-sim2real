@@ -1,8 +1,8 @@
 """LEAP Hand v1 Lite 텔레오퍼레이션 ROS2 노드.
 
 알고리즘은 전부 leap_hand_mapping (순수 파이썬, pip install -e .) 에 있고, 여기 노드는
-토픽을 잇기만 한다. 카메라·ROS 없이 코어를 테스트할 수 있어야 하고, Phase 2 에서
-학습한 정책을 배포할 때도 같은 코어를 쓴다.
+토픽을 잇기만 한다. 카메라·ROS 없이 코어를 테스트할 수 있어야 하고, 다른 명령원(예: 학습 정책)을
+붙일 때도 같은 코어를 쓴다.
 
     tracker_node      웹캠 -> /hand/landmarks (PointCloud2, 21점, MediaPipe world m)
     retarget_node     /hand/landmarks -> /leap/joint_cmd (JointState, MuJoCo 관절 순서)

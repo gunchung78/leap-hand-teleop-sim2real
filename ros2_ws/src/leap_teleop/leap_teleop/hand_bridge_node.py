@@ -68,6 +68,7 @@ class HandBridgeNode(Node):
         self.declare_parameter("current_warn", 400.0)
         self.declare_parameter("current_release", 300.0)
         self.declare_parameter("freeze_count", 3)
+        self.declare_parameter("limits", "teleop")        # teleop | model (joint_map.LIMIT_TABLES)
         self.declare_parameter("cmd_timeout", 2.0)
         self.declare_parameter("engage_speed", 1.0)
         self.declare_parameter("engage_tol", 0.05)
@@ -82,6 +83,9 @@ class HandBridgeNode(Node):
         self.current_warn = float(p("current_warn"))
         self.current_release = float(p("current_release"))
         self.freeze_count = int(p("freeze_count"))
+        self.limits = str(p("limits"))
+        if self.limits not in jm.LIMIT_TABLES:
+            raise RuntimeError(f"limits 는 {list(jm.LIMIT_TABLES)} 중 하나: {self.limits}")
         self._over_streak = 0
         self.cmd_timeout = float(p("cmd_timeout"))
         jm.self_check()
@@ -108,7 +112,7 @@ class HandBridgeNode(Node):
         self.create_timer(1.0 / float(p("poll_rate")), self._poll_tick)
         self.get_logger().info(
             f"{TOPIC_JOINT_CMD} -> {TOPIC_CMD_LEAP}  데드맨 {TOPIC_ENABLE} (기본 false)"
-            f"  max_speed {self.max_speed} rad/s  전류 동결 >{self.current_warn:.0f}"
+            f"  max_speed {self.max_speed} rad/s  전류 동결 >{self.current_warn:.0f}  범위 {self.limits}"
         )
 
     # ---- 입력 ----
@@ -124,7 +128,7 @@ class HandBridgeNode(Node):
         else:
             self.get_logger().warning("관절 이름/개수가 안 맞는 명령. 버림")
             return
-        self.target = jm.clip_mujoco(q)
+        self.target = jm.clip_mujoco(q, self.limits)
         self.target_rx = time.time()
 
     def _on_enable(self, msg: Bool) -> None:
@@ -153,7 +157,7 @@ class HandBridgeNode(Node):
         dt = 1.0 / 60.0
         speed = self.max_speed if self.engaged else self.engage_speed
         step = np.clip(self.target - self.current, -speed * dt, speed * dt)
-        self.current = jm.clip_mujoco(self.current + step)
+        self.current = jm.clip_mujoco(self.current + step, self.limits)
         self._send(self.current)
         if not self.engaged and self._engage_t0 is not None and time.time() - self._engage_t0 > self.engage_timeout:
             # 목표가 계속 움직이는 경우(학습 정책 20 Hz): tol 안에 못 들어와도 램프는 제 역할(첫 점프 제거)을 했다
@@ -168,7 +172,7 @@ class HandBridgeNode(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "leap_motor"
         msg.name = [str(i) for i in range(jm.NUM_JOINTS)]          # 모터 ID
-        msg.position = [float(v) for v in jm.safe_leaphand_command(q_mujoco)]
+        msg.position = [float(v) for v in jm.mujoco_to_leaphand(jm.clip_mujoco(q_mujoco, self.limits))]
         self.pub_cmd.publish(msg)
         self._n_cmd += 1
 
@@ -192,7 +196,7 @@ class HandBridgeNode(Node):
         if pos.shape != (jm.NUM_JOINTS,):
             self.get_logger().warning(f"실기 자세 길이 {pos.shape}. 무시")
             return
-        self.current = jm.clip_mujoco(jm.leaphand_to_mujoco(pos))
+        self.current = jm.clip_mujoco(jm.leaphand_to_mujoco(pos), self.limits)
         self.get_logger().info(f"실기 자세 동기 완료. 최대 |q| {np.degrees(np.abs(self.current).max()):.1f} deg")
 
     # ---- 피드백 / 전류 감시 ----
@@ -247,7 +251,7 @@ class HandBridgeNode(Node):
             # 힘 빼기: 실기가 **지금 있는** 자세를 목표로 한 번 보낸다. 명령만 멈추면 막히던 목표가
             # 모터에 남아 계속 밀고(전류 한계 ~469), 그래서 해제 임계 밑으로 영영 못 내려온다.
             if self.enabled and self.current is not None:
-                self.current = jm.clip_mujoco(q_real)
+                self.current = jm.clip_mujoco(q_real, self.limits)
                 self._send(self.current)
             self.get_logger().warning(
                 f"전류 초과 {over} 가 {self._over_streak}표본 연속 — 동결. 현재 자세를 명령해 힘을 뺐다."
