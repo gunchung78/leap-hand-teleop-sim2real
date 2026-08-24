@@ -14,7 +14,7 @@
 | 항목 | 값 |
 |---|---|
 | U2D2 | `FT232H Single` (`0403:6014`) |
-| 포트 | `/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBIN91W-if00-port0` → `ttyUSB0` |
+| 포트 | `/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_<시리얼>-if00-port0` → `ttyUSB0` |
 | 다른 FTDI | `FT2232 Dual` → `ttyUSB1`, `ttyUSB2` — **U2D2 가 아니다. 쓰지 말 것** |
 
 `ttyUSB0` 이라는 번호는 USB 를 다시 꽂으면 바뀔 수 있다. 항상 `by-id` 경로를 쓴다.
@@ -35,7 +35,7 @@
 
 ## 1단계 — 포트 권한 (1회만)
 
-현재 `geon` 은 `dialout` 그룹에 없어서 포트를 열 수 없다.
+사용자가 `dialout` 그룹에 없으면 포트를 열 수 없다.
 
 ```bash
 sudo usermod -aG dialout $USER

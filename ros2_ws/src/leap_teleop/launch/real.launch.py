@@ -27,7 +27,7 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
-DEFAULT_PORT = "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FTBIN91W-if00-port0"
+DEFAULT_PORT = ""   # 비우면 업스트림이 자동 탐색. FTDI 가 여럿이면 port:=/dev/serial/by-id/... 로 지정
 
 
 def generate_launch_description():
