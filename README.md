@@ -18,6 +18,10 @@ MediaPipe 손 추적 → 손끝 위치 IK 리타겟팅 → ROS2 → MuJoCo 트�
 - **안전 우선** — 실기로 나가는 길은 노드 하나(`hand_bridge_node`)뿐: 데드맨, 시작 자세 유지, 합류 램프, 전류 동결, 관절 범위 클립. 가짜 실기(`fake:=true`)로 이 로직을 실기 없이 시험한다.
 - **ROS 없이도 코어를 쓴다** — `leap_hand_mapping/` 은 순수 파이썬 패키지. 단일 스크립트 텔레옵(`p1_3_teleop_mujoco.py`)이 있다.
 
+## 데모
+
+[![데모 영상](https://img.youtube.com/vi/2xUvcvrsXDM/hqdefault.jpg)](https://youtube.com/shorts/2xUvcvrsXDM)
+
 ## 요구 사항
 
 | | 필요 | 비고 |
