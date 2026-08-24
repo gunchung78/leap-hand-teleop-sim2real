@@ -1,0 +1,19 @@
+# leap-hand 환경 (Python 3.10, conda) — 텔레오퍼레이션 / MuJoCo 트윈 / ROS2 노드
+#   conda create -n leap-hand python=3.10 -y && conda activate leap-hand
+#   pip install -r requirements.txt && pip install -e .
+# ROS 2 Humble(rclpy, sensor_msgs 등)은 apt 로 시스템에 설치한다 — pip 로 받지 않는다.
+# 버전은 2026-08-24 검증된 조합. 다른 조합은 docs/setup.md "문제 해결" 참고.
+
+# 코어 (leap_hand_mapping, scripts/)
+mujoco==3.11.0
+pybullet==3.2.7
+mediapipe==1.0.1
+opencv-python>=4.10,<6
+numpy>=2.0,<3
+dynamixel-sdk==4.0.5
+
+# ROS2 워크스페이스를 conda 파이썬으로 빌드하기 위한 것 (which colcon 이 conda 경로여야 한다)
+colcon-common-extensions==0.3.0
+empy==3.3.4
+lark>=1.1
+catkin_pkg>=1.0

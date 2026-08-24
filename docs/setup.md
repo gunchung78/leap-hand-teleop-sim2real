@@ -49,9 +49,8 @@ cd ..
 ```bash
 conda create -n leap-hand python=3.10 -y
 conda activate leap-hand
-pip install mujoco==3.11.0 pybullet==3.2.7 mediapipe==1.0.1 opencv-python numpy dynamixel-sdk
+pip install -r requirements.txt                                       # 코어 + ROS2 빌드 도구(conda 파이썬의 colcon). 버전 고정
 pip install -e .                                                      # leap_hand_mapping (ROS 노드가 import)
-pip install empy==3.3.4 lark catkin_pkg colcon-common-extensions       # ROS2 빌드를 **conda 파이썬으로**
 bash scripts/phase1/p1_0_fetch_mediapipe_model.sh                     # hand_landmarker.task (7.5 MB) -> models/
 ```
 

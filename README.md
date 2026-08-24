@@ -46,9 +46,7 @@ cd ..
 
 # 2. conda 환경 + 코어 패키지 + MediaPipe 모델
 conda create -n leap-hand python=3.10 -y && conda activate leap-hand
-pip install mujoco==3.11.0 pybullet==3.2.7 mediapipe==1.0.1 opencv-python numpy dynamixel-sdk
-pip install -e .
-pip install empy==3.3.4 lark catkin_pkg colcon-common-extensions     # ROS2 빌드를 conda 파이썬으로
+pip install -r requirements.txt && pip install -e .                 # 코어 + ROS2 빌드 도구 (conda 파이썬의 colcon)
 bash scripts/phase1/p1_0_fetch_mediapipe_model.sh                   # hand_landmarker.task → models/
 
 # 3. ROS2 워크스페이스
