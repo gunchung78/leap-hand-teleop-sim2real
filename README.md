@@ -17,6 +17,8 @@
 
 ## 현재 상태
 
+> 교육용 실습 과정(Phase 0/1, 8단원): **[course/00_overview.md](course/00_overview.md)**
+
 | 단계 | 내용 | 상태 |
 |---|---|---|
 | 환경 | Ubuntu 22.04 / conda `leap-hand` / JAX GPU | 완료 |
