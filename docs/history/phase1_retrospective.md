@@ -1,7 +1,9 @@
 # Phase 1 회고 — 웹캠 텔레오퍼레이션 + 디지털 트윈 (2026-08-19 ~ 08-23)
 
+> 성격: 개발 기록 — 작성 당시 기준. 현재 절차·경로는 `../setup.md`, `../guide/`, `../teleop_howto.md` 를 따를 것.
+
 Phase 1 동안 **무슨 일이 있었고, 무엇을 왜 고쳤고, 지금 어떤 상태인지**를 한 곳에 모은 기록이다.
-사용 절차는 `teleop_howto.md`, 계획과 노드 사양은 `phase1_plan.md`, 수치 표는 README 에 있다.
+사용 절차는 `teleop_howto.md`, 계획과 노드 사양은 `history/phase1_plan.md`, 수치 표는 README 에 있다.
 이 문서는 "왜 지금 모양이 이런가"에 답한다. Phase 1 을 마치고 썼다.
 
 ---
@@ -172,6 +174,6 @@ ros2_ws/src/leap_teleop/
 scripts/phase0/p0_4_read_reliability.py      읽기 오류율
 scripts/phase1/p1_4_teleop_metrics.py        Hz / 지연 / 추종 / 정지 떨림
 scripts/phase1/p1_5_step_response.py         계단 응답
-docs/phase1_plan.md  docs/teleop_howto.md  docs/phase1_retrospective.md (이 문서)
+docs/history/phase1_plan.md  docs/teleop_howto.md  docs/history/phase1_retrospective.md (이 문서)
 bak/2026-08-21_thumb_work/                   되돌리기 전 작업 보관 (+ 브랜치 bak/2026-08-21-thumb-work)
 ```

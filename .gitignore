@@ -27,8 +27,10 @@ ros2_ws/log/
 ros2_ws/src/leap_hand/
 
 # 정리 (납품용)
-bak/                 # 되돌리기 전 작업은 브랜치 bak/2026-08-21-thumb-work 에만
+# 되돌리기 전 작업은 브랜치 bak/2026-08-21-thumb-work 에만
+bak/
 .claude/
 *.egg-info/
 MUJOCO_LOG.TXT
-leaphand.txt         # 인수인계 문서 (개인 정보)
+# 인수인계 문서 (개인 정보)
+leaphand.txt
