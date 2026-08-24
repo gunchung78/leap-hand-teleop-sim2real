@@ -146,6 +146,10 @@ LEAP Hand v1 **Lite**(Dynamixel XL330-M288-T ×16, 플라스틱 기어), U2D2, 5
 
 [LEAP Hand](https://leap-hand.github.io) (CMU) 의 하드웨어·API·URDF, [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) 의 LEAP 모델, [MediaPipe](https://github.com/google-ai-edge/mediapipe) Hand Landmarker 위에서 만들었다.
 
+## Author
+
+Geon Lee (geonlee) — [sweng.geon@gmail.com](mailto:sweng.geon@gmail.com) / [gunchung78@gmail.com](mailto:gunchung78@gmail.com)
+
 ## 라이선스
 
 이 저장소 코드는 [MIT](LICENSE). 참조하는 외부 소프트웨어와 조건은 [NOTICE.md](NOTICE.md) — 특히 LEAP_Hand_API / Bidex_VisionPro_Teleop 는 **CC BY-NC 4.0(비상업)** 이며 저장소에 포함하지 않고 이용자가 직접 받는다.

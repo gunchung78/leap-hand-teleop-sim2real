@@ -6,7 +6,6 @@
 | 항목 | 값 |
 |---|---|
 | OS | Ubuntu 22.04.5 LTS (커널 6.8) |
-| GPU / 드라이버 | RTX 3060 Laptop 6 GB / NVIDIA 580 (CUDA 12 호환) |
 | ROS2 | Humble (apt, `/opt/ros/humble`, Python 3.10) |
 | conda | Anaconda. 환경 `leap-hand`(py3.10, 텔레옵·ROS2) |
 | 실기 | LEAP Hand v1 **Lite**, U2D2(FTDI FT232H), 5V 30A 전원 |
