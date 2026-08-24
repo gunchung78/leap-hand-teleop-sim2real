@@ -1,5 +1,7 @@
 # Phase 1 구현 계획 — 웹캠 텔레오퍼레이션 + 디지털 트윈 (ROS2)
 
+> 성격: 개발 기록 — 작성 당시 기준. 현재 절차·경로는 `../setup.md`, `../guide/`, `../teleop_howto.md` 를 따를 것.
+
 > 작성일 2026-08-20. Phase 0(관절 매핑 확정) 완료 후.
 > 이전 Phase 1 구현은 백지화하고 다시 짠다. 근거는 1장.
 
@@ -368,7 +370,7 @@ S7 문서 커밋. 남은 것: 사용자의 라이브 확인(sim.launch), 실기 
 **완료 (2026-08-23):** 라이브 확인 전부 통과 — sim.launch 동일 동작, 실기 계단 16관절, 웹캠+실기 라이브
 32 ms / 트윈 RMS 1.95° / 정지 떨림 <1°. 그 과정에서 추가된 것: 데드맨 SPACE 토글, hold_on_start, 합류 램프,
 전류 동결(디바운스 + 힘 빼기), 떨림 기본값(kP 400 / smoothing 0.2 / deadband 1° / restart 50 mm / pip_target /
-tip_mode axis), 벌림 관절 텔레옵 제한. 남은 것: 데모 영상, 엄지 IK 떨림(th_cmc 3°). 전체 회고는 `phase1_retrospective.md`.
+tip_mode axis), 벌림 관절 텔레옵 제한. 남은 것: 데모 영상, 엄지 IK 떨림(th_cmc 3°). 전체 회고는 `history/phase1_retrospective.md`.
 
 각 단계는 독립적으로 커밋한다. S5 전까지는 실기에 전원을 넣지 않는다.
 

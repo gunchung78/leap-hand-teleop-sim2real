@@ -1,12 +1,12 @@
-# 6단원 — ROS2 로 묶기: 노드 다섯, 토픽 하나로 시뮬과 실기를 같이
+# ROS2 로 묶기: 노드 다섯, 토픽 하나로 시뮬과 실기를 같이
 
-> 원문: `README.md` "Phase 1 — ROS2 통합", `docs/phase1_plan.md` 3·5장, `ros2_ws/src/leap_teleop/`, `docs/teleop_howto.md` "ROS2 로 돌리기"
+> 원문: `../design/ros2_twin.md`, `../history/phase1_plan.md` 3·5장, `ros2_ws/src/leap_teleop/`, `../teleop_howto.md` "ROS2 로 돌리기"
 
-## 목표
+## 요약
 
-- 단일 스크립트를 왜 노드로 쪼갰는지, 어디서 쪼갰는지 설명할 수 있다.
-- QoS, `header.stamp` 전파, 런치 파라미터 타입 같은 **ROS2 특유의 함정**을 안다.
-- 업스트림 패키지를 **vendoring 하지 않고** 재현 가능하게 쓰는 법(복사 스크립트 + 패치)을 안다.
+- 단일 스크립트를 왜 노드로 쪼갰는지, 어디서 쪼갰는지 설명한다.
+- QoS, `header.stamp` 전파, 런치 파라미터 타입 같은 **ROS2 특유의 함정**을 정리한다.
+- 업스트림 패키지를 **vendoring 하지 않고** 재현 가능하게 쓰는 법(복사 스크립트 + 패치)을 정리한다.
 
 ## 배경
 
@@ -49,7 +49,7 @@ tracker_node ──/hand/landmarks──▶ retarget_node ──/leap/joint_cmd�
 복사하고 `patches/leap_hand_port_param.patch` 하나를 얹는다. 패치 내용: `port`/`baudrate` 파라미터, `hold_on_start`(토크 켤 때
 현재 자세 유지). 업스트림 갱신 = 스크립트 재실행 + 패치 재적용.
 
-## 실습
+## 실행
 
 ```bash
 conda activate leap-hand && source /opt/ros/humble/setup.bash
@@ -64,7 +64,7 @@ ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: true"
 ros2 launch leap_teleop real.launch.py                     # 🤖 실기. 카메라 창 SPACE = 데드맨
 ```
 
-### 예시 출력 — 토픽 주파수 (7단원 `p1_4`)
+### 예시 출력 — 토픽 주파수 (`measurement.md` `p1_4`)
 
 ```
 토픽                  수신    Hz   지연 평균 ms   95%   최대
@@ -74,28 +74,10 @@ ros2 launch leap_teleop real.launch.py                     # 🤖 실기. 카메
 /real/joint_states    578  28.9
 ```
 
-## 관찰할 것
+## 결과 읽는 법
 
 - 노드를 쪼갠 뒤 종단 지연이 32 ms — 단일 스크립트 때와 같다. 전송 비용은 1 ms 미만. ROS2 는 지연을 만들지 않는다, 밀린 큐가 만든다.
 - `fake:=true` 는 업스트림 노드와 **같은 토픽·서비스 이름**만 흉내낸다. 안전 로직(데드맨, 동결)을 실기 없이 시험하는 용도.
   `fake_current` 파라미터로 전류 초과도 재현된다.
 - `sim_node` 는 `qpos` 를 직접 넣지 않고 액추에이터에 명령을 주고 물리를 돌린다. 충돌과 추종 지연이 보여야 트윈 구실을 한다
   (시뮬에서 `if_rot`/`mf_rot` 충돌이 그렇게 드러났다).
-
-## 문제
-
-1. `/leap/joint_cmd` 를 `RELIABLE depth 10` 으로 바꾸면 어떤 상황에서 무슨 증상이 나는가?
-2. `stamp` 를 각 노드가 `now` 로 덮어쓰면 무엇을 잃는가? 어느 노드는 `now` 를 써야 하는가?
-3. 실기 데드맨 토픽 `/teleop/enable` 이 `depth 10 RELIABLE` 인 이유는?
-4. 업스트림 `leaphand_node` 를 그대로 두고 우리 패키지에 안전 로직을 넣는 설계가, 업스트림을 고쳐서 넣는 것보다 나은 점 둘.
-
-## 해설
-
-1. 소비자(예: 뷰어가 느린 sim_node)가 밀리면 큐에 명령이 쌓여 **과거 명령을 순서대로 재생**한다 — 손을 멈춰도 로봇이 계속 움직인다.
-2. 종단 지연을 잃는다. `/sim`, `/real` 상태 토픽은 측정 시각이 곧 의미이므로 `now` 가 맞다.
-3. 상태(켜짐/꺼짐)는 한 번 놓치면 안 된다. 센서처럼 "최신만"이 아니라 "반드시 전달".
-4. (a) 업스트림 갱신·라이선스 문제에서 자유롭다, (b) 실기 경로가 우리 노드 하나로 좁아져 안전 규칙을 한 곳에서 검토·시험(fake)할 수 있다.
-
-## 다음 단원
-
-7단원 — 측정으로 말하기.

@@ -135,5 +135,5 @@ ros2_ws/src/leap_teleop/   ROS2 노드·런치.  ros2_ws/src/leap_hand/ 는 setu
 scripts/phase0|1/      측정 스크립트 (전부 재현 가능)
 models/                hand_landmarker.task (내려받음)
 third_party/           참조 저장소 클론 (gitignore, 1장 커밋 고정)
-docs/  course/         문서 / 교육 과정
+docs/                  문서 (setup, guide/, design/, history/, howto)
 ```
