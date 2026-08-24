@@ -27,7 +27,6 @@ setup(
             "sim_node = leap_teleop.sim_node:main",
             "hand_bridge_node = leap_teleop.hand_bridge_node:main",
             "fake_hand_node = leap_teleop.fake_hand_node:main",
-            "policy_node = leap_teleop.policy_node:main",
         ],
     },
 )

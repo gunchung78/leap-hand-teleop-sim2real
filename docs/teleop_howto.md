@@ -350,35 +350,3 @@ ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: false"    # 그 �
 | 브리지가 "/leap_position 서비스를 기다리는 중" | leaphand_node 가 안 떴다. 포트/전원/Dynamixel Wizard 점유 확인 |
 | 실기가 안 움직임 | 데드맨. `ros2 topic echo /teleop/enable` |
 
-## 학습 정책으로 돌리기 (Phase 2, `rotate_z`)
-
-사람 손 대신 MJX 로 학습한 정책이 `/leap/joint_cmd` 를 낸다. 뒷단(시뮬 트윈 / 브리지 / 실기)은 텔레옵과 같다.
-학습·내보내기는 **`leap-mjx`** 환경, ROS2 실행은 **`leap-hand`** 환경이다 (`docs/phase2_plan.md` 3장).
-
-```bash
-# (최초 1회) 학습 환경
-bash scripts/phase2/setup_mjx_env.sh
-
-# 학습 (leap-mjx). 업스트림 train_jax_ppo.py 호출. 1e8 스텝 ≈ 70~90 분 (RTX 3060 Laptop)
-conda activate leap-mjx
-bash scripts/phase2/p2_1_train.sh                               # v0: 업스트림 그대로 (DR=1 로 도메인 무작위화)
-python scripts/phase2/p2_4_train_lite.py --domain_randomization --suffix v1-lite   # v1: Lite 토크 상한 + 벌점
-tensorboard --logdir logs/phase2
-
-# 재생·지표 (CPU MuJoCo) 와 내보내기
-python scripts/phase2/p2_2_play_policy.py --ckpt logs/phase2/<run>/checkpoints --episodes 3 --video out.mp4
-python scripts/phase2/p2_3_export_policy.py --ckpt logs/phase2/<run>/checkpoints --out models/rotate_z_v0.npz
-
-# ROS2 (leap-hand)
-conda activate leap-hand && source ros2_ws/install/setup.bash
-ros2 launch leap_teleop policy.launch.py policy:=models/rotate_z_v0.npz             # 트윈: 큐브 장면 MuJoCo
-ros2 launch leap_teleop policy.launch.py policy:=models/rotate_z_v0.npz real:=true  # + 실기
-ros2 topic pub --once /teleop/enable std_msgs/msg/Bool "data: true"                 # 실기 데드맨 ON (카메라 창이 없어 CLI 로)
-```
-
-- `policy_node` 는 `/sim/joint_states`(또는 `real:=true` 면 `/real/joint_states`) 16 관절각 + 직전 행동을 입력으로
-  20 Hz 로 목표각을 낸다. numpy 만 쓴다(jax 불필요).
-- 범위 클립은 `limits:=model` (두 모델 교집합). 텔레옵 기본(`teleop`, 벌림 ±3°)은 정책이 벌림을 ±20° 넘게 써서 깨진다.
-- 실기 전에 `p2_2` 의 "예상 전류 최대 / >350 비율" 을 본다. 업스트림 v0 정책은 600 mA 까지 쓰므로 Lite(350)에선
-  브리지가 얼린다 → v1(Lite 변형) 정책을 쓴다.
-- 실기 시험 순서: `real:=true fake:=true`(배선) → 실기 **빈손**(전류·떨림, 데드맨 ON/OFF) → 실물 큐브(7 cm, ~108 g).

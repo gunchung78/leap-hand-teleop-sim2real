@@ -1,4 +1,4 @@
-# LEAP Hand v1 Lite — 텔레오퍼레이션 / 디지털 트윈 / MJX 강화학습
+# LEAP Hand v1 Lite — 텔레오퍼레이션 / 디지털 트윈
 
 > **2026-08-21 — 코드를 보정 이전(커밋 `7cccfdd`)으로 되돌렸다.**
 > 엄지 정렬 캘리브레이션("보정")을 넣은 뒤로 고칠수록 라이브에서 이상해져서, 보정이 없던
@@ -24,7 +24,6 @@
 | 환경 | Ubuntu 22.04 / conda `leap-hand` / JAX GPU | 완료 |
 | Phase 0 | **관절 매핑 테이블 확정 + 기하 검증 + 실기 대조** | 완료 |
 | Phase 1 | **웹캠 텔레오퍼레이션 + 디지털 트윈** (ROS2, 시뮬+실기 동시) | 완료 — 라이브 32 ms / 트윈 RMS 1.95° |
-| Phase 2 | MJX 강화학습 (`rotate_z`) | 미착수 |
 
 ---
 
@@ -441,7 +440,7 @@ geon 라이브 확인(2026-08-21): `sim.launch.py` 가 단일 스크립트와 **
   나머지 관절은 1° 안팎. 떨림 수정 전에는 실기가 눈에 띄게 떨렸다(수치 없음 — 그때는 분해 스크립트가 없었다).
 - 전류 동결 0회 (벌림 관절 제한 뒤).
 
-Phase 1 **완료.** 남은 개선 후보는 엄지 IK(잔차·떨림)와 데모 영상. 그다음은 Phase 2.
+Phase 1 **완료.** 남은 개선 후보는 엄지 IK(잔차·떨림)와 데모 영상.
 무슨 일이 있었고 무엇을 왜 고쳤는지는 **`docs/phase1_retrospective.md`** 에 전부 모았다.
 
 실기 계단 응답 (2026-08-21, 데드맨 → `if_mcp` 한 관절 → 16관절 전체, 관절당 20°, 표본 41~44):
@@ -463,7 +462,7 @@ mf_dip     67     66    0.21          th_ipl     80     31    0.05
   MCP(밑마디) 셋이 100 ms 로 가장 느리고 정상오차도 ~2° 로 가장 크다 — 손가락 전체 관성을 드는 관절이라 그렇다.
 - **시뮬과 다른 점 하나.** 시뮬에서는 `if_rot`/`mf_rot` 가 영점에서 20° 벌리면 옆 손가락과 충돌해 5.9° 에서
   막혔는데, 실기는 1.9~2.3° 로 정상 추종했다. menagerie 충돌 박스가 실물보다 보수적이거나 실물 영점이
-  조금 다르다는 뜻이다. 트윈의 충돌 기하는 실물 기준으로 손볼 여지가 있다(Phase 2 전에).
+  조금 다르다는 뜻이다. 트윈의 충돌 기하는 실물 기준으로 손볼 여지가 있다.
 - 계단 중 전류 동결은 한 번도 뜨지 않았다(정지 상태 20° 스텝, 부하 없음).
 - 실기 읽기는 4 Mbps 에서 약 3% 가 CRC 로 깨져 직전 값으로 대체된다
   (`scripts/phase0/p0_4_read_reliability.py`, 방식·주기와 무관 → 배선/전기 쪽).
@@ -518,19 +517,18 @@ with LeapHandDriver(port=find_port()) as hand:
 ```
 
 `mujoco_playground`의 LEAP 모델도 menagerie 계열이라
-(`leap_hand_constants.JOINT_NAMES`가 동일함을 확인) 이 매핑은 **Phase 2에 그대로 재사용된다.**
+(`leap_hand_constants.JOINT_NAMES`가 동일함을 확인) 이 매핑은 그쪽에도 그대로 쓸 수 있다.
 
 ---
 
 ## 환경 구성
 
-> 처음부터 끝까지(두 conda 환경, 참조 저장소 커밋, ROS2, 실기 udev, 확인·문제 해결): **[docs/setup.md](docs/setup.md)**
+> 처음부터 끝까지(conda 환경, 참조 저장소 커밋, ROS2, 실기 udev, 확인·문제 해결): **[docs/setup.md](docs/setup.md)**
 
 ```bash
 conda create -n leap-hand python=3.10 -y     # ROS2 Humble rclpy 와 같은 버전
 conda activate leap-hand
-pip install "jax[cuda12]" mujoco mujoco-mjx playground pybullet \
-            mediapipe opencv-python numpy dynamixel-sdk
+pip install mujoco pybullet mediapipe opencv-python numpy dynamixel-sdk
 
 bash scripts/phase1/p1_0_fetch_mediapipe_model.sh   # MediaPipe 1.x 는 모델을 패키지에 넣지 않는다
 
@@ -554,7 +552,6 @@ mkdir -p third_party && cd third_party
 git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie.git
 git clone --depth 1 https://github.com/leap-hand/Bidex_VisionPro_Teleop.git
 git clone --depth 1 https://github.com/leap-hand/LEAP_Hand_API.git
-git clone --depth 1 https://github.com/google-deepmind/mujoco_playground.git
 ```
 
 라이선스: 코드 MIT / CAD는 CC BY-NC-SA(비상업).

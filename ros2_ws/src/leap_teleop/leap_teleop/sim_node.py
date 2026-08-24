@@ -44,7 +44,6 @@ class SimNode(Node):
         self.declare_parameter("viewer", True)
         self.declare_parameter("rate", 60.0)
         self.declare_parameter("publish_rate", 60.0)
-        self.declare_parameter("scene", "twin")           # twin: menagerie 손만 | cube: playground 학습 장면(손바닥 위 큐브)
         self.declare_parameter("limits", "teleop")        # 이름 없는 명령 클립 표 (teleop | model)
         p = lambda n: self.get_parameter(n).value  # noqa: E731
 
@@ -52,28 +51,12 @@ class SimNode(Node):
 
         self.mujoco = mujoco
         self.limits = str(p("limits"))
-        scene = str(p("scene"))
-        if scene == "cube":
-            from leap_hand_mapping.cube_scene import SCENE_XML, load_cube_model
-            path = str(SCENE_XML)
-            self.model = load_cube_model()
-        else:
-            path = str(p("model_path"))
-            if not os.path.exists(path):
-                raise FileNotFoundError(f"MuJoCo 모델이 없다: {path} (README 환경 구성의 menagerie clone 참고)")
-            self.model = mujoco.MjModel.from_xml_path(path)
+        path = str(p("model_path"))
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"MuJoCo 모델이 없다: {path} (README 환경 구성의 menagerie clone 참고)")
+        self.model = mujoco.MjModel.from_xml_path(path)
         self.data = mujoco.MjData(self.model)
-        if self.model.nkey > 0:
-            # 학습 장면: 키프레임 home = 학습 기본 자세 + 큐브 위치. 목표 큐브(mocap)는 학습처럼 숨긴다
-            mujoco.mj_resetDataKeyframe(self.model, self.data, 0)
-            if self.model.nmocap > 0:
-                self.data.mocap_pos[:] = [-100.0, -100.0, -100.0]
         mujoco.mj_forward(self.model, self.data)
-        sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, "cube_angvel")
-        self._cube_angvel_adr = int(self.model.sensor_adr[sid]) if sid >= 0 else None
-        sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, "cube_position")
-        self._cube_pos_adr = int(self.model.sensor_adr[sid]) if sid >= 0 else None
-        self._angvel_hist = []
 
         # 명령은 이름으로 매핑한다. 액추에이터 순서가 MuJoCo 관절 순서와 같음을 Phase 0 에서
         # 확인했지만, 그래도 이름으로 맞추면 모델이 바뀌어도 조용히 틀어지지 않는다.
@@ -137,17 +120,9 @@ class SimNode(Node):
                 self.get_logger().info("뷰어가 닫혔다. 종료")
                 raise KeyboardInterrupt
             self.viewer.sync()
-        if self._cube_angvel_adr is not None:
-            self._angvel_hist.append(float(self.data.sensordata[self._cube_angvel_adr + 2]))
         if now - self._last_log >= 5.0:
             lat = f"{np.mean(self._lat[-150:]):.1f} ms" if self._lat else "-"
-            cube = ""
-            if self._cube_angvel_adr is not None and self._angvel_hist:
-                z = float(self.data.sensordata[self._cube_pos_adr + 2]) if self._cube_pos_adr is not None else float("nan")
-                cube = f"  큐브 z각속도 {np.mean(self._angvel_hist[-300:]):+.2f} rad/s  높이 {z:+.3f} m"
-                if self._cube_pos_adr is not None and z < -0.05:
-                    cube += "  (떨어짐)"
-            self.get_logger().info(f"명령 {self._n_cmd}  촬영->시뮬 지연 {lat}  접촉 {self.data.ncon}{cube}")
+            self.get_logger().info(f"명령 {self._n_cmd}  촬영->시뮬 지연 {lat}  접촉 {self.data.ncon}")
             self._last_log = now
 
     def _publish(self) -> None:
