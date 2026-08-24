@@ -10,7 +10,7 @@
 - 대상: 파이썬과 ROS2 기초(노드·토픽·런치)는 아는데 로봇 손은 처음인 사람.
 - 준비물: Ubuntu 22.04, 웹캠, (선택) LEAP Hand v1 **Lite** + U2D2. **실기가 없어도 1~7단원은 시뮬로 끝까지 간다.**
   실기 단원은 🤖 표시.
-- 환경 구성: `README.md` "환경 구성" 절 그대로 (conda `leap-hand`, `pip install -e .`, third_party 클론, ROS2 빌드).
+- 환경 구성: **`docs/setup.md`** 그대로 (conda `leap-hand`, `pip install -e .`, third_party 클론, ROS2 빌드). 강화학습용 `leap-mjx` 는 이 과정에선 불필요.
 
 ## 단원
 
