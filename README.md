@@ -524,6 +524,8 @@ with LeapHandDriver(port=find_port()) as hand:
 
 ## 환경 구성
 
+> 처음부터 끝까지(두 conda 환경, 참조 저장소 커밋, ROS2, 실기 udev, 확인·문제 해결): **[docs/setup.md](docs/setup.md)**
+
 ```bash
 conda create -n leap-hand python=3.10 -y     # ROS2 Humble rclpy 와 같은 버전
 conda activate leap-hand
